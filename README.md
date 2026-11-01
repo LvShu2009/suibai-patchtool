@@ -8,7 +8,7 @@
 
 - APK：`dist/patchtool-v3.3.apk`
 - 完整工具包（APK + 源码 + SU 脚本 + 指南 + 图标）：`dist/patchtool-kit-v3.3.zip`
-- 网页版下载页：开启 GitHub Pages 后访问 `https://<用户名>.github.io/<仓库名>/`
+- 在线下载页：https://lvshu2009.github.io/suibai-patchtool/
 
 ## 功能
 

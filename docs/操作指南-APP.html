@@ -1,0 +1,220 @@
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>酸败补丁助手 v2.1 · 操作指南</title><style>
+body{margin:0;background:#0f1115;color:#e6e8ee;font:15px/1.75 -apple-system,"PingFang SC","Microsoft YaHei",sans-serif;padding:22px 16px 60px}
+.wrap{max-width:820px;margin:0 auto}
+h1{font-size:21px;border-bottom:1px solid #262b36;padding-bottom:10px}
+h2{font-size:17px;margin-top:26px;color:#8fb0ff}
+h3{font-size:15px;color:#c8d2e6}
+table{border-collapse:collapse;width:100%;margin:12px 0;font-size:13.5px}
+th,td{border:1px solid #262b36;padding:7px 9px;text-align:left}
+th{background:#171a21}
+code{background:#11141b;border:1px solid #262b36;border-radius:5px;padding:1px 5px;font-size:12.5px}
+pre{background:#11141b;border:1px solid #262b36;border-radius:10px;padding:12px;overflow:auto}
+pre code{border:0;padding:0}
+blockquote{border-left:3px solid #3a4354;margin:10px 0;padding-left:12px;color:#9aa3b2}
+a{color:#7ea6ff}
+li{margin:3px 0}
+</style></head><body><div class="wrap"><h1>酸败补丁助手 v2.1 · 操作指南</h1>
+<p>一个<strong>免 root</strong> 的补丁安装器：权限走 <strong>Shizuku</strong>，替代原来的 su 脚本。</p>
+<p>装补丁、开反和谐、备份、回滚、清理，都在一个界面里点。</p>
+<p>---</p>
+<h2>1. 环境要求</h2>
+<table><thead><tr><th>项</th><th>要求</th></tr></thead><tbody>
+<tr><td>Android</td><td>8.0 以上（minSdk 24 / targetSdk 33）</td></tr>
+<tr><td>Shizuku</td><td>已安装、已启动、已授权给本 APP（API 13.x）</td></tr>
+<tr><td>存储权限</td><td>「所有文件访问权限」（Android 11+）或读写存储（Android 10-）</td></tr>
+<tr><td>游戏</td><td>需先装好，酸败官服包名 <code>com.jumpw.mobile300</code></td></tr>
+</tbody></table>
+<blockquote><code>Android/data/</code> 对普通应用进程是<strong>不可见</strong>的（系统限制，不是 bug）。</blockquote>
+<blockquote>所以「目录是否存在」「拷贝文件」全部由 Shizuku 的 shell 执行，</blockquote>
+<blockquote>界面里的「探测」也是走 shell，不是应用自己去看目录。</blockquote>
+<p>---</p>
+<h2>1.5 两条执行通道（任选其一）</h2>
+<p>工具不再强制依赖 Shizuku，<strong>root 和 Shizuku 两条路并存</strong>：</p>
+<table><thead><tr><th>通道</th><th>怎么来</th><th>特点</th></tr></thead><tbody>
+<tr><td><strong>root（su）</strong></td><td>设备已 root，勾选配置里的「优先用 root 执行」</td><td>身份真 uid=0，脚本走 <code>/data/media/0</code>，不碰 FUSE，能 chown 给游戏、能写 root 拥有的目录；<strong>不需要激活 Shizuku</strong></td></tr>
+<tr><td><strong>Shizuku</strong></td><td>装 Shizuku 并授权本应用</td><td>身份是 shell(uid=2000) 或 root(uid=0，若用 root 激活)；shell 激活时偶尔会遇到挂载点失效</td></tr>
+</tbody></table>
+<p>选择逻辑：勾了「优先用 root」<strong>且</strong>探测到可用 su → 走 root；否则自动回落到 Shizuku。</p>
+<p>状态栏第一行会直接写当前走的是哪条、什么身份。</p>
+<h2>2. 首次使用</h2>
+<ol>
+<li>安装 <code>酸败补丁助手.apk</code>（作者签名，覆盖安装无需卸载）。</li>
+<li><strong>选一条通道</strong>：</li>
+</ol>
+<ul>
+<li>有 root：勾上配置里的「优先用 root 执行」，第一次运行会弹 su 授权，点允许即可（<strong>不用开 Shizuku</strong>）</li>
+<li>没 root：点 <strong>① 授权 Shizuku</strong> → 弹窗里点「允许」</li>
+</ul>
+<ol>
+<li>点 <strong>② 文件访问权限</strong> → 系统设置里给「所有文件访问」。</li>
+<li>点 <strong>🔍 自动探测已安装的酸败目录</strong>（渠道服必须点；官服可跳过）。</li>
+</ol>
+<p>状态栏第一行显示 <code>执行通道：root（su）· uid=0</code> 或 <code>执行通道：Shizuku · uid=…</code>，且第二行两项都正常，就能干活了。</p>
+<p>---</p>
+<h2>3. 两个输入框</h2>
+<ul>
+<li><strong>补丁根目录</strong>：默认 <code>/storage/emulated/0/LvShu/酸败补丁</code></li>
+<p>  （补丁 zip 要放在它下面的 <code>补丁存放位置（zip）/</code>）</p>
+<li><strong>游戏 files 目录</strong>：</li>
+<li>官服 <code>/storage/emulated/0/Android/data/com.jumpw.mobile300/files</code></li>
+<li>渠道服包名不同，用「🔍 自动探测」自动填，或手动改成自己的</li>
+<li>结尾带不带 <code>/</code> 都行，程序会自动去掉</li>
+</ul>
+<p>两个输入框的内容会自动记住，下次打开不用重填。</p>
+<p>---</p>
+<h2>4. 按钮说明</h2>
+<table><thead><tr><th>按钮</th><th>作用</th></tr></thead><tbody>
+<tr><td><strong>① 授权 Shizuku</strong></td><td>申请 / 重新申请 Shizuku 权限</td></tr>
+<tr><td><strong>② 文件访问权限</strong></td><td>申请存储权限（Android 11+ 是「所有文件访问」）</td></tr>
+<tr><td><strong>🔍 自动探测已安装的酸败目录</strong></td><td>扫 <code>Android/data/*</code>，认出 jumpw/mclub/300 这类包，填进输入框</td></tr>
+<tr><td><strong>▶ 一键安装补丁</strong></td><td>把 <code>补丁存放位置（zip）/</code> 里<strong>所有</strong> <code>.zip</code> 按顺序装进游戏</td></tr>
+<tr><td><strong>🩹 反和谐安装（建 localmode.txt）</strong></td><td>在游戏 <code>files/</code> 下建一个空的 <code>localmode.txt</code>（官方反和谐开关），已有就跳过</td></tr>
+<tr><td><strong>↩ 一键回滚原版</strong></td><td>按备份索引把原版文件拷回游戏（会二次确认）</td></tr>
+<tr><td><strong>🧹 一键清理备份（省空间）</strong></td><td>删旧时间戳备份；可选连「原版」一起删</td></tr>
+<tr><td><strong>初始化目录</strong></td><td>创建整套目录结构（<code>补丁存放位置（zip）</code>、<code>操作日志</code>、<code>备份文件/原版</code> 等）</td></tr>
+<tr><td><strong>🗑 删除已安装的补丁 zip</strong></td><td>删掉补丁目录里<strong>已经装进游戏</strong>的 zip（只清 zip，不动游戏里的补丁、不动备份）</td></tr>
+<tr><td><strong>清空日志</strong></td><td>清屏幕；会问你「要不要连 <code>操作日志/</code> 里的 .log 文件一起删」（一起删 / 只清屏幕 / 取消）</td></tr>
+<tr><td><strong>📦 打包「待打包资源」</strong></td><td>把 <code>打包补丁/待打包资源/</code> 的内容打成标准 <code>files/...</code> 结构的 zip</td></tr>
+</tbody></table>
+<p>一次只允许跑一个任务，跑的时候按钮会变灰。</p>
+<p>---</p>
+<h2>5. 备份与回滚（重点）</h2>
+<h3>备份规则</h3>
+<ul>
+<li>所有备份统一放 <code>备份文件/&lt;包名&gt;/原版/</code>，<strong>同一个文件只备份一次</strong>，之后永不覆盖。</li>
+<li>备份时写索引 <code>备份文件/原版/.manifest.tsv</code>，每行三个字段（TAB 分隔）：</li>
+<p>  <code>相对路径 ⇥ cksum ⇥ 字节数</code></p>
+<li>判断「是不是真的备份过」靠 <strong>cksum</strong>，不靠文件名 —— 同名文件顶替会被发现。</li>
+</ul>
+<h3>四种情况分别怎么处理</h3>
+<table><thead><tr><th>情况</th><th>行为</th></tr></thead><tbody>
+<tr><td>备份不存在</td><td>覆盖前先备份，写索引，日志「已备份原版」</td></tr>
+<tr><td>备份存在且校验一致</td><td>跳过，日志「备份已有（校验一致，跳过）」</td></tr>
+<tr><td>备份存在但没索引（老备份）</td><td>只补记索引，不动文件：日志「备份已存在，补记校验索引」</td></tr>
+<tr><td>备份校验不符（同名顶替）</td><td>只告警，<strong>不改索引</strong>，回滚时拒绝这个文件</td></tr>
+</tbody></table>
+<h3>不会被误备份的两类</h3>
+<ul>
+<li><code>*.txt</code> / <code>*.md</code> 说明文件：它们不是游戏原版</li>
+<li><strong>内容和补丁一模一样的文件</strong>：说明它本来就已经是补丁，日志「与补丁内容相同，不备份（不是原版）」</li>
+</ul>
+<h3>回滚规则</h3>
+<ul>
+<li>逐个按索引核对 cksum，对得上才拷回，并 <code>chown</code> 给游戏、<code>chmod 0664</code></li>
+<li>校验不符 → 跳过并告警（防止把错的文件盖进去）</li>
+<li>备份内容与当前文件一致 → 提示「无需还原」（说明当初备份的已是补丁）</li>
+<li>说明文件 → 直接跳过</li>
+<li>结尾统计：<code>还原 N 个，跳过 N 个，失败 N 个</code></li>
+</ul>
+<blockquote>建议回滚前先退出游戏，避免资源被游戏进程锁住。</blockquote>
+<p>---</p>
+<h2>6. 清理备份</h2>
+<p>点 <strong>🧹 一键清理备份</strong> 会先报家底（原版几个文件多少 MB、旧时间戳目录几个多少 MB），然后三选：</p>
+<ul>
+<li><strong>删旧目录</strong>：只删 <code>yyyyMMdd_HHmmss</code> 形式的旧备份，<code>原版</code> 保留（推荐）</li>
+<li><strong>全部删除</strong>：连 <code>原版</code> 一起删，之后就没法一键回滚了</li>
+<li><strong>取消</strong></li>
+</ul>
+<p>安全边界：只认这两种目录名，你自己放进去的其它文件夹一律不碰；</p>
+<p>脚本发现路径不是 <code>…/备份文件</code> 会直接中止（一个文件都不删）。</p>
+<p>---</p>
+<h2>6.4 备份会不会重复、会不会把补丁当原版</h2>
+<p>不会。装补丁时脚本对每个文件按顺序判断：</p>
+<ol>
+<li><strong>当前文件内容和补丁完全相同</strong> → 判定&quot;不是原版&quot;，不备份（日志：<code>与补丁内容相同，不备份</code>）</li>
+<li><strong>备份文件已存在</strong> → 永不覆盖；索引（<code>.manifest.tsv</code>）里已有记录就跳过（日志：<code>备份已有（校验一致，跳过）</code>）</li>
+<li><strong>备份存在但索引里没有</strong> → 只补记索引，不动文件</li>
+<li><strong>备份存在但校验不符</strong> → 报 <code>⚠ 备份校验不符（疑似同名文件顶替）</code>，不覆盖、回滚时也拒绝这个文件</li>
+</ol>
+<p>另外 v3.1 起还多一条：如果备份内容居然和补丁一模一样，会报</p>
+<p><code>⚠ 备份内容和补丁一模一样，这份备份是假的（当初备份到的就是补丁），回滚它等于没回滚</code> —— 这类历史遗留的&quot;假原版&quot;能一眼看出来。</p>
+<h2>6.5 安装前自检与退出码</h2>
+<p>每次安装/回滚<strong>动手之前</strong>会先试写一个探测文件（<code>touch</code>），写不进去就直接中止：</p>
+<pre><code>
+✗ 游戏目录当前不可写（挂载点失效），已中止，一个文件都没动
+</code></pre>
+<p>这样不会出现&quot;装到一半才发现挂载点挂了&quot;。</p>
+<table><thead><tr><th>退出码</th><th>含义</th></tr></thead><tbody>
+<tr><td>0</td><td>全部成功</td></tr>
+<tr><td>2</td><td>无法进入解压目录</td></tr>
+<tr><td>3</td><td>游戏目录不存在</td></tr>
+<tr><td>4</td><td>备份目录不存在（回滚）</td></tr>
+<tr><td>5</td><td>备份路径不合法，拒绝删除（清理）</td></tr>
+<tr><td>6</td><td>找不到可写的挂载点</td></tr>
+<tr><td>7</td><td>自检失败：目录当前不可写</td></tr>
+<tr><td>8</td><td>有文件写入/还原失败（日志会点名几个）</td></tr>
+</tbody></table>
+<h2>6.6 完成后的结果弹窗</h2>
+<p>每次点按钮跑完，都会弹一个结果框，不用去翻日志：</p>
+<table><thead><tr><th>操作</th><th>弹窗</th><th>内容</th></tr></thead><tbody>
+<tr><td>一键安装</td><td><strong>补丁安装完成</strong></td><td>补丁数量、写入文件成功/失败数、游戏目录、可直接点「打开游戏」</td></tr>
+<tr><td>一键回滚</td><td><strong>回滚完成</strong></td><td>已还原几个原版文件、目标目录、可打开游戏</td></tr>
+<tr><td>反和谐</td><td><strong>反和谐已安装</strong></td><td>localmode.txt 就位</td></tr>
+<tr><td>清理备份</td><td><strong>清理完成</strong></td><td>释放了多少、原版保留</td></tr>
+</tbody></table>
+<p>弹窗上的「打开游戏」会按你填的游戏目录反推包名去启动，省得回桌面找图标。</p>
+<h2>7. 日志在哪</h2>
+<table><thead><tr><th>操作</th><th>日志</th></tr></thead><tbody>
+<tr><td>安装</td><td><code>操作日志/install_&lt;时间戳&gt;.log</code></td></tr>
+<tr><td>反和谐</td><td><code>操作日志/anti_&lt;时间戳&gt;.log</code></td></tr>
+<tr><td>回滚</td><td><code>操作日志/restore_&lt;时间戳&gt;.log</code></td></tr>
+<tr><td>清理</td><td><code>操作日志/clean_&lt;时间戳&gt;.log</code></td></tr>
+</tbody></table>
+<p>界面底部也会同步显示，跑完会自动滚动到末尾。</p>
+<p>---</p>
+<h2>8. 目录结构</h2>
+<pre><code>
+LvShu/酸败补丁/
+├── 酸败补丁助手.apk
+├── 补丁存放位置（zip）/      ← 补丁 zip 放这里
+├── 操作日志/                 ← 每次运行的日志
+├── 备份文件/
+│   └── 原版/                 ← 唯一备份区 + .manifest.tsv 索引
+├── 临时解压/                 ← 解压中转，跑完自动清，中断残留会下次自动收拾
+├── 补丁素材源文件/           ← 打包中转
+├── 打包补丁/待打包资源/      ← 要打包的文件放这里
+</code></pre>
+<p>---</p>
+<h2>9. 常见问题</h2>
+<p><strong>Q：提示「游戏目录不存在」？</strong></p>
+<p><code>Android/data</code> 普通应用看不到是正常的。先确认 ① Shizuku 已授权，再点 🔍 探测。</p>
+<p>渠道服包名不是 <code>com.jumpw.mobile300</code>，要以探测结果为准。</p>
+<p><strong>Q：以前报 <code>Transport endpoint is not connected</code>？</strong></p>
+<p>Android 11+ 的 FUSE 目录在 shell 里偶尔抽风。v1.2 起：shell 是 root 时自动把</p>
+<p><code>/storage/emulated/0/...</code> 换成 <code>/data/media/0/...</code> 直连，并带重试，已不会再出现。</p>
+<p><strong>Q：界面白字白底看不清？</strong></p>
+<p>v1.1 起强制浅色主题、所有颜色写死，不跟随系统深色模式。</p>
+<p><strong>Q：安装完游戏里没变化？</strong></p>
+<p>先看日志结尾的「合计 N 个文件」。如果是 0，说明 zip 里没有 <code>files/</code> 目录结构</p>
+<p>（裸文件包），日志会明确打 <code>⚠ 这个补丁一个文件都没部署</code>。</p>
+<p>老脚本就是在这里静默失败的。</p>
+<p><strong>Q：想恢复某个补丁前的内容？</strong></p>
+<p>点「↩ 一键回滚原版」。如果日志说「无需还原」，说明当初备份下来的已经是补丁，</p>
+<p>这个文件没有原版可回。</p>
+<p><strong>Q：Shizuku 重启后失效？</strong></p>
+<p>重新点 ① 授权即可。Shizuku 本身被系统杀掉要重新启动 Shizuku。</p>
+<p><strong>Q：能不能不用 Shizuku，直接用 su？</strong></p>
+<p>可以，见同目录 <code>SU脚本操作指南.md</code>，两套工具共用同一份备份索引，互相兼容。</p>
+<p>---</p>
+<h2>10. 版本历史</h2>
+<table><thead><tr><th>版本</th><th>变更</th></tr></thead><tbody>
+<tr><td>v1.0</td><td>首个可用版本：Shizuku 安装补丁</td></tr>
+<tr><td>v1.1</td><td>修跨线程崩溃、浅色主题</td></tr>
+<tr><td>v1.2</td><td>root 直连 <code>/data/media/0</code>、重试、chown/chmod</td></tr>
+<tr><td>v1.5</td><td>反和谐按钮、探测目录、打包按钮</td></tr>
+<tr><td>v1.6</td><td>备份只存一份 + cksum 索引；一键回滚</td></tr>
+<tr><td>v1.7</td><td>一键清理备份（三选、路径护栏）</td></tr>
+<tr><td>v1.9</td><td>0 文件告警；说明文件不备份；临时残留自动清理；回滚跳过无意义条目</td></tr>
+<tr><td>v2.0</td><td>与补丁同内容的文件不再当原版备份；配套源码/文档/打包</td></tr>
+<tr><td>v2.1</td><td>多挂载点探测（pass_through/mnt/storage）+ 写入失败自动切换；备份目录不可写时明确告警</td></tr>
+<tr><td>v2.2</td><td>不再残留 <code>.w_test</code> 探测文件</td></tr>
+<tr><td>v2.3</td><td>回滚去掉「内容一致就跳过」（设备上出现过假一致）；安装/回滚<strong>开跑前自检</strong>；有失败返回非 0</td></tr>
+<tr><td>v2.4</td><td>删掉没用上的「异常记录」目录</td></tr>
+<tr><td>v2.5</td><td>「清空日志」可以连磁盘上的日志文件一起删</td></tr>
+<tr><td>v3.0</td><td>新增 root 通道：有 su 时可直接用 root 执行，不需要先激活 Shizuku（两条通道并存）</td></tr>
+<tr><td>v3.1</td><td>备份按<strong>游戏包名分目录</strong>（官服/渠道服互不覆盖）；新增「删除已安装的补丁 zip」；备份与补丁内容相同时明确告警（识别假原版）；回滚日志写明还原目标和备份来源</td></tr>
+<tr><td>v3.2</td><td>界面实时显示「备份归类：备份文件/&lt;包名&gt;/原版/」，改路径立刻跟着变</td></tr>
+<tr><td><strong>v3.3</strong></td><td>每次操作完成弹结果框（可直接「打开游戏」）；屏幕日志自动滚到最新一行</td></tr>
+</tbody></table>
+<p>---</p>
+<p>作者签名 APK，覆盖安装即可。源码在 <code>源码/</code> 目录。</p><p style="margin-top:30px"><a href="./index.html">← 返回下载页</a></p></div></body></html>

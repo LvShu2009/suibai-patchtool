@@ -1,0 +1,97 @@
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>SU 脚本 · 操作指南（修订版 v2）</title><style>
+body{margin:0;background:#0f1115;color:#e6e8ee;font:15px/1.75 -apple-system,"PingFang SC","Microsoft YaHei",sans-serif;padding:22px 16px 60px}
+.wrap{max-width:820px;margin:0 auto}
+h1{font-size:21px;border-bottom:1px solid #262b36;padding-bottom:10px}
+h2{font-size:17px;margin-top:26px;color:#8fb0ff}
+h3{font-size:15px;color:#c8d2e6}
+table{border-collapse:collapse;width:100%;margin:12px 0;font-size:13.5px}
+th,td{border:1px solid #262b36;padding:7px 9px;text-align:left}
+th{background:#171a21}
+code{background:#11141b;border:1px solid #262b36;border-radius:5px;padding:1px 5px;font-size:12.5px}
+pre{background:#11141b;border:1px solid #262b36;border-radius:10px;padding:12px;overflow:auto}
+pre code{border:0;padding:0}
+blockquote{border-left:3px solid #3a4354;margin:10px 0;padding-left:12px;color:#9aa3b2}
+a{color:#7ea6ff}
+li{margin:3px 0}
+</style></head><body><div class="wrap"><h1>SU 脚本 · 操作指南（修订版 v2）</h1>
+<p>三个脚本，全部保持<strong>原来的 su（root）权限模型</strong>：不考虑权限访问问题，直接 su 驱动。</p>
+<p>改的只有逻辑和健壮性。</p>
+<p>---</p>
+<h2>1. 三个脚本干什么</h2>
+<table><thead><tr><th>脚本</th><th>用途</th><th>调用方式</th></tr></thead><tbody>
+<tr><td><code>自动安装补丁.sh</code></td><td>把 <code>补丁存放位置（zip）/*.zip</code> 全装进游戏</td><td><code>sh /storage/emulated/0/LvShu/酸败补丁/自动安装补丁.sh</code></td></tr>
+<tr><td><code>自动打包补丁文件.sh</code></td><td>把 <code>打包补丁/待打包资源/</code> 打成标准 zip</td><td><code>sh 自动打包补丁文件.sh &#x27;data/android/assetbundle/prefabs/heroes&#x27;</code></td></tr>
+<tr><td><code>创建所需文件夹.sh</code></td><td>建整套目录结构</td><td><code>sh 创建所需文件夹.sh</code></td></tr>
+</tbody></table>
+<p><strong>不需要自己先敲 su</strong>：脚本开头会自己判断，不是 root 就 <code>exec su -c &quot;sh &#x27;$0&#x27;&quot;</code> 提权一次，</p>
+<p>之后全程 root 执行（本质还是 su，只是一次到位）。</p>
+<p>在 MT 管理器 / Termux / 任意终端里直接 <code>sh 脚本名</code> 就行，会弹一次 root 授权。</p>
+<p>---</p>
+<h2>2. 原始版 → 修订版 改了什么</h2>
+<h3>自动安装补丁.sh</h3>
+<table><thead><tr><th>#</th><th>原始版问题</th><th>修订版</th></tr></thead><tbody>
+<tr><td>1</td><td><code>find &quot;$TMP_DIR/files&quot;</code> 硬依赖 <code>files/</code> 前缀，裸文件包会<strong>静默部署 0 个文件却打印「✓ 解压完成」</strong></td><td>自动判断结构：有 <code>files/</code> 用 <code>files/</code>，没有就用包根；一个文件都没装时明确打 <code>⚠ 这个补丁一个文件都没部署</code></td></tr>
+<tr><td>2</td><td>完全没有备份，覆盖即不可逆</td><td>覆盖前备份到 <code>备份文件/原版/</code>，写 cksum 索引（与 APP 同一个格式，APP 能一键回滚）</td></tr>
+<tr><td>3</td><td>没有备份判断，重复跑会把已打补丁的版本当原版</td><td>只备份一次；<strong>内容和补丁相同的文件不备份</strong>；同名顶替会被 cksum 发现并告警</td></tr>
+<tr><td>4</td><td>日志最后一次性 <code>su -c &quot;echo &#x27;$LOG_BUFFER&#x27; &gt; 文件&quot;</code>：中途崩一个字不剩，内容含单引号会截断命令</td><td>每行日志<strong>即时追加</strong>，崩了也能看到进度</td></tr>
+<tr><td>5</td><td>每步都嵌一层 <code>su -c &quot;...&quot;</code>，路径带空格/引号极易炸</td><td>开头提权一次，后面直接跑，引号地狱消失</td></tr>
+<tr><td>6</td><td>结束没有统计</td><td>结尾汇总：补丁几个、文件几个、成功几个、失败几个</td></tr>
+</tbody></table>
+<h3>自动打包补丁文件.sh</h3>
+<table><thead><tr><th>#</th><th>原始版问题</th><th>修订版</th></tr></thead><tbody>
+<tr><td>1</td><td>必须手动输入路径</td><td>支持命令行直接给路径，不给才交互</td></tr>
+<tr><td>2</td><td>依赖系统 <code>zip</code>，缺了直接报错看不懂</td><td>先检测，缺了给出替代方案（用 APP 的打包按钮）</td></tr>
+<tr><td>3</td><td>中途 Ctrl-C 会留下 <code>补丁素材源文件/tmp_*</code></td><td><code>trap</code> 兜底清理</td></tr>
+<tr><td>4</td><td>输出目录是补丁根目录</td><td>直接输出到 <code>补丁存放位置（zip）/</code>，装完就能被安装脚本扫到</td></tr>
+</tbody></table>
+<h3>创建所需文件夹.sh</h3>
+<table><thead><tr><th>#</th><th>原始版问题</th><th>修订版</th></tr></thead><tbody>
+<tr><td>1</td><td>用了 bash 数组 <code>DIRS_TO_CREATE=(...)</code>，<code>/system/bin/sh</code> 是 mksh，<strong>直接语法报错</strong></td><td>改成 POSIX 循环，任何 sh 都能跑</td></tr>
+<tr><td>2</td><td><code>tree</code> 不存在，输出一片报错</td><td>去掉 tree，用 <code>ls -ld</code></td></tr>
+<tr><td>3</td><td>没建 <code>备份文件/原版</code>（备份要用的目录）</td><td>补上，并顺带建 <code>打包补丁/待打包资源</code></td></tr>
+<tr><td>4</td><td>失败也继续往下跑</td><td>统计失败个数，结尾给结论</td></tr>
+</tbody></table>
+<p>---</p>
+<h2>3. 与 APP 的配合</h2>
+<p>两边<strong>共用同一套备份</strong>：</p>
+<pre><code>
+备份文件/原版/&lt;相对路径&gt;         ← 原始文件
+备份文件/原版/.manifest.tsv      ← 相对路径 TAB cksum TAB 字节数
+</code></pre>
+<ul>
+<li>SU 脚本装的补丁，可以点 APP 的「↩ 一键回滚原版」还原</li>
+<li>APP 装的补丁，也能被 SU 脚本的备份逻辑继续追加（同一份索引）</li>
+<li>两边都不会重复备份、都不会把&quot;已经是补丁&quot;的文件当原版存</li>
+</ul>
+<p>---</p>
+<h2>4. 注意</h2>
+<ul>
+<li>脚本里的路径是写死的（<code>/storage/emulated/0/LvShu/酸败补丁</code>），换目录要改文件头的变量</li>
+<li>路径含空格时，调用要加引号：<code>sh 自动打包补丁文件.sh &#x27;a b/c&#x27;</code></li>
+<li>解压中转用 <code>/data/local/tmp/patch_tmp</code>（重启会清空，无所谓，每次都会重建）</li>
+<li>老设备可能没有 <code>zip</code>/<code>unzip</code>，缺 <code>zip</code> 就用 APP 的打包按钮</li>
+<li>日志在 <code>操作日志/install_su_&lt;时间戳&gt;.log</code>，与 APP 的 <code>install_&lt;时间戳&gt;.log</code> 分开放</li>
+</ul>
+<p>---</p>
+<h2>5. 排错</h2>
+<table><thead><tr><th>现象</th><th>原因 / 处理</th></tr></thead><tbody>
+<tr><td>脚本一跑就退出、没有日志</td><td>没给 root 授权；或路径写错（改文件头变量）</td></tr>
+<tr><td>「游戏目录不存在，退出」</td><td>渠道服包名不是 <code>com.jumpw.mobile300</code>，改脚本里的 <code>GAME_DIR</code></td></tr>
+<tr><td>「⚠ 这个补丁一个文件都没部署」</td><td>zip 里既没有 <code>files/</code> 也没有可识别的文件；检查 zip 内容</td></tr>
+<tr><td>「⚠ 备份校验不符（疑似同名顶替）」</td><td>备份目录里那个文件被别的同名文件换过了；脚本不会改索引，回滚也会跳过它</td></tr>
+<tr><td>安装成功但游戏没变</td><td>确认装的是对应渠道的资源；确认游戏重启过</td></tr>
+<tr><td><code>zip: command not found</code></td><td>用 APP 的「📦 打包」按钮代替</td></tr>
+</tbody></table>
+<p>---</p>
+<h2>6. 三个脚本完整用法示例</h2>
+<pre><code>
+# 1) 首次准备
+sh /storage/emulated/0/LvShu/酸败补丁/创建所需文件夹.sh
+
+# 2) 把补丁 zip 丢进 补丁存放位置（zip）/，然后
+sh /storage/emulated/0/LvShu/酸败补丁/自动安装补丁.sh
+
+# 3) 自己做一个补丁：把文件放进 打包补丁/待打包资源/，然后
+sh /storage/emulated/0/LvShu/酸败补丁/自动打包补丁文件.sh &#x27;data/android/assetbundle/prefabs/heroes&#x27;
+# 输出：补丁存放位置（zip）/补丁_&lt;时间戳&gt;.zip（内部结构 files/data/android/...）
+</code></pre><p style="margin-top:30px"><a href="./index.html">← 返回下载页</a></p></div></body></html>

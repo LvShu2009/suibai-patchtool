@@ -1,21 +1,40 @@
 #!/bin/bash
-# 酸败补丁助手 —— 纯命令行构建（便携 JDK + Debian 版 aapt + r8/d8）
+# 酸败补丁助手 —— 命令行构建
+#
+# 依赖（全部用环境变量提供，不写死任何本机绝对路径）：
+#   ANDROID_TOOLS  工具根目录，需包含：
+#                  android-34/android.jar
+#                  sysroot/usr/lib/android-sdk/build-tools/debian/{aapt,zipalign}
+#                  r8.jar、apksigner.jar、apksig.jar
+#                  api/classes.jar、prov/classes.jar、aidl/classes.jar、shared/classes.jar（Shizuku）
+#   JAVA_HOME      可选，JDK 17+；不设则用 PATH 里的 java/javac
+#   KS_FILE        可选，签名密钥库，默认 ./keystore.jks
+#   KS_PASS        密钥库口令（必填，不落盘）
+#   KEY_PASS       密钥口令（必填，不落盘）
+#   ANDROID_TOOLS_LD 可选，aapt 运行需要的 LD_LIBRARY_PATH
 set -e
 
-export PATH=/root/build/tools/jdk-17.0.2/bin:$PATH
-TOOLS=/root/build/tools
-SYS=$TOOLS/sysroot
-AAPT=$SYS/usr/lib/android-sdk/build-tools/debian/aapt
-ZIPALIGN=$SYS/usr/lib/android-sdk/build-tools/debian/zipalign
-AJAR=$TOOLS/android-34/android.jar
-PROJ=/root/build/p342
-OUT=$PROJ/build
+PROJ="$(cd "$(dirname "$0")" && pwd)"
+OUT="$PROJ/build"
+TOOLS="${ANDROID_TOOLS:?请先设置 ANDROID_TOOLS，指向包含 android.jar、build-tools、r8 与 Shizuku jars 的目录}"
+AJAR="$TOOLS/android-34/android.jar"
+SYS="$TOOLS/sysroot"
+AAPT="${AAPT_BIN:-$SYS/usr/lib/android-sdk/build-tools/debian/aapt}"
+ZIPALIGN="${ZIPALIGN_BIN:-$SYS/usr/lib/android-sdk/build-tools/debian/zipalign}"
+[ -n "${JAVA_HOME:-}" ] && export PATH="$JAVA_HOME/bin:$PATH"
+[ -n "${ANDROID_TOOLS_LD:-}" ] && export LD_LIBRARY_PATH="$ANDROID_TOOLS_LD"
 
-export LD_LIBRARY_PATH=$SYS/usr/lib/aarch64-linux-gnu/android:$SYS/usr/lib/7zip:$SYS/usr/lib/aarch64-linux-gnu:$SYS/usr/lib
-
-# Shizuku: api / provider / aidl / shared 四个 aar 的 classes.jar
 LIBJARS="$TOOLS/api/classes.jar:$TOOLS/prov/classes.jar:$TOOLS/aidl/classes.jar:$TOOLS/shared/classes.jar"
 PROGRAM_JARS="$TOOLS/api/classes.jar $TOOLS/prov/classes.jar $TOOLS/aidl/classes.jar $TOOLS/shared/classes.jar"
+
+for f in "$AJAR" "$AAPT" "$ZIPALIGN" "$TOOLS/r8.jar" "$TOOLS/apksigner.jar" \
+         "$TOOLS/api/classes.jar" "$TOOLS/prov/classes.jar" "$TOOLS/aidl/classes.jar" "$TOOLS/shared/classes.jar"; do
+    if [ ! -f "$f" ]; then
+        echo "✗ 缺少构建依赖: $f" >&2
+        echo "  按脚本头部注释准备 ANDROID_TOOLS；Shizuku 的四个 classes.jar 必须齐全。" >&2
+        exit 1
+    fi
+done
 
 rm -rf "$OUT"
 mkdir -p "$OUT/classes" "$OUT/dex"
@@ -48,19 +67,22 @@ echo "== 5/6 zipalign =="
 "$ZIPALIGN" -f 4 "$OUT/base.apk" "$OUT/aligned.apk"
 
 echo "== 6/6 签名 =="
-KS=$PROJ/keystore.jks
+KS="${KS_FILE:-$PROJ/keystore.jks}"
 if [ ! -f "$KS" ]; then
-    keytool -genkeypair -keystore "$KS" -storepass lvshu123 -keypass lvshu123 \
-        -alias lvshu -keyalg RSA -keysize 2048 -validity 10950 \
-        -dname "CN=LvShu PatchTool, OU=patch, O=LvShu, L=CN, ST=CN, C=CN" >/dev/null 2>&1
+    echo "✗ 找不到签名密钥库: $KS" >&2
+    echo "  请自己生成并离线保存，不要提交到仓库：" >&2
+    echo "  keytool -genkeypair -keystore keystore.jks -alias lvshu -keyalg RSA -keysize 2048 -validity 10950" >&2
+    exit 1
 fi
-java -cp "$SYS/usr/share/java/apksigner.jar:$SYS/usr/share/java/apksig.jar" \
+: "${KS_PASS:?请通过环境变量提供密钥库口令 KS_PASS}"
+: "${KEY_PASS:?请通过环境变量提供密钥口令 KEY_PASS}"
+java -cp "$TOOLS/apksigner.jar:$TOOLS/apksig.jar" \
     com.android.apksigner.ApkSignerTool sign \
-    --ks "$KS" --ks-pass pass:lvshu123 --key-pass pass:lvshu123 \
+    --ks "$KS" --ks-pass env:KS_PASS --key-pass env:KEY_PASS \
     --min-sdk-version 24 \
     --out "$OUT/酸败补丁助手.apk" "$OUT/aligned.apk"
 
 echo "== 完成 =="
 ls -l "$OUT/酸败补丁助手.apk"
-java -cp "$SYS/usr/share/java/apksigner.jar:$SYS/usr/share/java/apksig.jar" \
+java -cp "$TOOLS/apksigner.jar:$TOOLS/apksig.jar" \
     com.android.apksigner.ApkSignerTool verify --print-certs "$OUT/酸败补丁助手.apk" | head -8

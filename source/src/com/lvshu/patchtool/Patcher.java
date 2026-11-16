@@ -182,6 +182,149 @@ final class Patcher {
      * 内容完全不同，CAB 却一模一样 → CAB 是「按资源路径/名字」派生的，不随内容变。
      * 所以它能当资源身份键用：拿补丁 ab 的 CAB 去游戏 CAB 表里查，就能定位到原位置。
      */
+    /**
+     * 建 CAB 索引的 shell 脚本（v3.8 快速版）。
+     *
+     * 旧版每个文件跑 4 次 fork：
+     *   c=$(head -c 8192 "$f" | sed ... | grep -a -o 'CAB-...' | head -1)
+     * 26184 个文件 ≈ 13 万次进程创建，实测 26.5 条/秒、16 分 29 秒。
+     *
+     * 新版：find 出清单，xargs 每 64 个文件起一个 sh，fork 降到几百次。
+     * 判定规则：只看前 8192 字节，取第一处 CAB- + 精确 32 位十六进制，
+     * 输出 "CAB-xxx<TAB>绝对路径"（v3.12.1 起锁定 32 位，避免贪婪多吃一位）。
+     *
+     * 不依赖 uid=0：只用 sh 内建与 toybox 常备命令，
+     * Shizuku(uid=2000) 和 root 都能跑。
+     *
+     * @param outFile   输出 tsv（App 可读的公共目录）
+     * @param selfCheck 是否额外用旧算法抽 50 条，写到 <outFile>.chk 供 App 比对
+     */
+    static String buildCabIndexScript(String gameStr, File outFile, boolean selfCheck) {
+        String abroot = gameStr + "/data/android/assetbundle";
+        String out = esc(outFile.getAbsolutePath());
+        String chk = esc(outFile.getAbsolutePath() + ".chk");
+
+        StringBuilder sb = new StringBuilder();
+        sb.append("#!/system/bin/sh\n");
+        sb.append("# 酸败补丁助手 —— 建 CAB 索引（快速版）\n");
+        sb.append("G='").append(esc(abroot)).append("'\n");
+        sb.append("O='").append(out).append("'\n");
+        sb.append("CHK='").append(chk).append("'\n");
+        sb.append("if [ ! -d \"$G\" ]; then echo \"[$(date '+%H:%M:%S')] [索引] ✗ 目录不存在: $G\"; exit 3; fi\n");
+        // 【双通道兼容】root 与 Shizuku(uid=2000) 都要能跑。
+        //   • 索引目录若由对方身份创建，本身份可能写不进去 → 先测目录可写，再强制删旧文件。
+        //   • 旧版只用 ": > $O"，在文件属主是 root 时 Shizuku 清空会静默失败，
+        //     脚本继续 >> 追加，导致行数虚高、数据错乱（2026-11-11 实测 6172 个文件产出 26354 行）。
+        sb.append("D=$(dirname \"$O\")\n");
+        sb.append("mkdir -p \"$D\" 2>/dev/null\n");
+        sb.append("if ! touch \"$D/.w_test\" 2>/dev/null; then echo \"[$(date '+%H:%M:%S')] [索引] ✗ 索引目录不可写（属主可能是另一个身份），请手动删除: $D\"; exit 5; fi\n");
+        sb.append("rm -f \"$D/.w_test\" 2>/dev/null\n");
+        sb.append("rm -f \"$O\" \"$CHK\" 2>/dev/null\n");
+        sb.append("if ! : > \"$O\" 2>/dev/null; then echo \"[$(date '+%H:%M:%S')] [索引] ✗ 无法创建: $O\"; exit 2; fi\n");
+        sb.append(": > \"$CHK\" 2>/dev/null\n");
+        sb.append("L=\"$O.list\"\n");
+        sb.append("rm -f \"$L\" 2>/dev/null\n");
+        sb.append("echo \"[$(date '+%H:%M:%S')] [索引] 身份 uid=$(id -u)  扫描根 $G\"\n");
+        // 必须 find -print0 与 xargs -0 配对。若 find 用换行而 xargs 用 -0，
+        // 整份清单会被当成一个超长文件名，瞬间“扫完”且产出 0 行。
+        sb.append("find \"$G\" -type f -name '*.assetbundle' -print0 2>/dev/null > \"$L\"\n");
+        sb.append("TOTAL=$(tr -cd '\\000' < \"$L\" | wc -c | tr -d ' ')\n");
+        sb.append("echo \"[$(date '+%H:%M:%S')] [索引] 待扫描 $TOTAL 个 .assetbundle\"\n");
+        sb.append("if [ \"$TOTAL\" = \"0\" ]; then echo \"[$(date '+%H:%M:%S')] [索引] ✗ 一个文件都没找到\"; rm -f \"$L\"; exit 4; fi\n");
+        // 诊断实测（诊断_cab扫描/probe.log，2026-11-07 01:08）：
+        //   • 瓶颈是 FUSE 读取，head -c 8192 约 15ms/文件，全量下限约 6~10 分钟；
+        //   • toybox awk (20240311) 不保证支持 ENDFILE（gawk 扩展），且把二进制 ab
+        //     当文本读会读完整个文件（几十 MB），比 head -c 8192 慢得多 → 不能用；
+        //   • xargs -P 可用；
+        //   • 「head -c 8192 + grep + awk 输出」在 xargs 子 shell 里产出真 TAB，
+        //     full_test.tsv 的 hex 已验证（09 分隔、0A 结尾）。
+        // 【禁用 -P 并行】实测（诊断_cab扫描/verify.log 2026-11-07 07:10）：
+        //   xargs -P 4 -0 -n 64 在 toybox 上退出码 0、stderr 为空，
+        //   但 26218 个文件只处理了 360 个就返回，剩余静默丢弃。
+        //   这正是“3 秒扫完、产出 0 行”的真正原因。
+        // 不加 -P 时 xargs 行为正常（probe.log: 1288 个 → 31s，完整处理）。
+        // 错误流向导：以后扫描失败能看到真实原因（以前 stderr 全丢 /dev/null）。
+        sb.append("ERR=\"$O.err\"\n");
+        sb.append(": > \"$ERR\" 2>/dev/null\n");
+        // 【v3.9】彻底不用 xargs。toybox 的 xargs 在本机实测会静默截断
+        // （26218 个只处理 360 个，退出码 0、stderr 为空），无论是否带 -P。
+        // 改成 find -print0 | tr '\0' '\n' | while read 逐条处理。
+        //
+        // 【v3.12 提速】每文件 fork 从 4 次降到 2 次：
+        //   旧: head(1) + printf(1) + grep(1) + head -1(1) = 4 次
+        //   新: head(1) + grep -m1(1)                      = 2 次
+        // grep -m1 找到第一处就停，不会读完大文件；去掉 case 预筛（多一层判断反而慢）。
+        // 实测（诊断_cab扫描/bench.log 2026-11-08）：448s→75s / 3000 个，
+        // 外推全量约 11 分钟，且产出条数与旧版完全一致（不丢数据）。
+        sb.append("tr '\\000' '\\n' < \"$L\" | while IFS= read -r f; do\n");
+        sb.append("  n=$((n+1))\n");
+        sb.append("  [ $((n % 500)) -eq 0 ] && echo \"[$(date '+%H:%M:%S')] [索引] 进度 $n/$TOTAL\" >&2\n");
+        // 【v3.12.1 修正】必须精确 32 位十六进制。
+        //   旧写法 'CAB-[0-9a-fA-F]*' 是贪婪匹配，会把 CAB 后面紧跟的十六进制字节
+        //   一起吃掉（实测 Shizuku 下产出 '...be9f' → '...be9f2'，多一位），
+        //   导致索引里的 CAB 与补丁文件读出的 CAB 不相等，同名消歧全部失效。
+        //   Unity 的 CAB 标识固定为 32 位，所以直接锁长度。
+        sb.append("  c=$(head -c 8192 \"$f\" 2>/dev/null | grep -a -m1 -o 'CAB-[0-9a-fA-F]\\{32\\}')\n");
+        sb.append("  [ -n \"$c\" ] && awk -v a=\"$c\" -v b=\"$f\" 'BEGIN{print a \"\\t\" b}'\n");
+        sb.append("done >> \"$O\" 2>>\"$ERR\"\n");
+        sb.append("XRC=$?\n");
+        sb.append("echo \"[$(date '+%H:%M:%S')] [索引] 循环退出码 $XRC\"\n");
+        // xargs 自身的错误也记下
+        sb.append("if [ -s \"$ERR\" ]; then\n");
+        sb.append("  echo \"[$(date '+%H:%M:%S')] [索引] ⚠ 出现错误输出（前 20 行）:\"\n");
+        sb.append("  head -n 20 \"$ERR\" | sed 's/^/  [err] /'\n");
+        sb.append("fi\n");
+        if (selfCheck) {
+            // v3.10：自检改用与主扫描相同的抽取算法（head -c 8192 | grep -ao）。
+            // 旧版用 sed 替换不可打印字符会截断二进制里的 CAB 串，与主扫描不等价，
+            // 导致「一致 15、不一致 35」的假告警。现在两边同算法，自检才有意义。
+            // 与主扫描严格同算法（v3.12 同步提速），否则自检会报假不一致。
+            sb.append("# 抽样自检：同算法跑 50 条，供 App 比对等价性\n");
+            sb.append("tr '\\000' '\\n' < \"$L\" | head -n 50 | while IFS= read -r f; do\n");
+            // 与主扫描严格同算法（含 32 位锁定），否则自检会报假不一致。
+            sb.append("  c=$(head -c 8192 \"$f\" 2>/dev/null | grep -a -m1 -o 'CAB-[0-9a-fA-F]\\{32\\}')\n");
+            sb.append("  [ -n \"$c\" ] && awk -v a=\"$c\" -v b=\"$f\" 'BEGIN{print a \"\\t\" b}'\n");
+            sb.append("done >> \"$CHK\" 2>/dev/null\n");
+        }
+        sb.append("GOT=$(wc -l < \"$O\" | tr -d ' ')\n");
+        sb.append("rm -f \"$L\"\n");
+        sb.append("echo \"[$(date '+%H:%M:%S')] [索引] 扫描结束：共 $TOTAL 个，命中 $GOT 条\"\n");
+        // 完整性校验：每个文件最多 1 条，结果远少于文件数说明扫描被截断。
+        // （2026-11-07 的 -P 并行就是这种情况：退出码 0、无报错，26218 个只出 360 条）
+        sb.append("if [ \"$TOTAL\" -gt 1000 ] && [ \"$GOT\" -lt $((TOTAL / 2)) ]; then\n");
+        sb.append("  echo \"[$(date '+%H:%M:%S')] [索引] ✗ 结果异常偏少（$GOT/$TOTAL），扫描可能被截断\"\n");
+        sb.append("fi\n");
+        // 【关键】结果转存到 App 私有目录。
+        //
+        // 实测（2026-11-07 多次）：shell 侧确实写出了 26,218 条结果，
+        // 但 App 进程 readText() 读同样是空，countLines() 也是 0。
+        // 文件在 /storage/emulated/0 下（非 Android/data），但 App 走 FUSE 读仍拿不到内容。
+        // 因此由 root 身份的脚本把成品拷进 App 私有目录，App 再读那份副本——
+        // 私有目录不经过 FUSE，不存在可见性问题。
+        // 【双通道兼容】结果转存：
+        //   root(uid=0) 能写 App 私有目录 /data/data/<pkg>/files → 转那里最稳。
+        //   Shizuku(uid=2000) 跨 uid 写不进私有目录 → 退回索引目录下的副本。
+        //   App 侧按“私有副本优先、索引目录副本兜底”读取。
+        sb.append("DSTP='/data/data/com.lvshu.patchtool/files/index_result.tsv'\n");
+        sb.append("DSTC='/data/data/com.lvshu.patchtool/files/index_result.chk'\n");
+        sb.append("if cp -f \"$O\" \"$DSTP\" 2>/dev/null && chmod 644 \"$DSTP\" 2>/dev/null; then\n");
+        sb.append("  echo \"[$(date '+%H:%M:%S')] [索引] 结果已转存私有目录 $DSTP\"\n");
+        sb.append("  cp -f \"$CHK\" \"$DSTC\" 2>/dev/null; chmod 644 \"$DSTC\" 2>/dev/null\n");
+        sb.append("else\n");
+        sb.append("  LD=\"$O.local.tsv\"\n");
+        sb.append("  LC=\"$O.local.chk\"\n");
+        sb.append("  if cp -f \"$O\" \"$LD\" 2>/dev/null && chmod 644 \"$LD\" 2>/dev/null; then\n");
+        sb.append("    echo \"[$(date '+%H:%M:%S')] [索引] 私有目录不可写，结果已转存索引目录 $LD\"\n");
+        sb.append("    cp -f \"$CHK\" \"$LC\" 2>/dev/null; chmod 644 \"$LC\" 2>/dev/null\n");
+        sb.append("  else\n");
+        sb.append("    echo \"[$(date '+%H:%M:%S')] [索引] ✗ 转存失败：$DSTP 与 $LD 都不可写\"\n");
+        sb.append("  fi\n");
+        sb.append("fi\n");
+        sb.append("rm -f \"$ERR\"\n");
+        sb.append("exit 0\n");
+        return sb.toString();
+    }
+
     static String cabOfFile(File f) {
         if (f == null || !f.isFile()) return null;
         java.io.FileInputStream in = null;
@@ -200,6 +343,10 @@ final class Patcher {
             while (i >= 0) {
                 int e = i + 4;
                 while (e < s.length() && isHexChar(s.charAt(e))) e++;
+                // 【v3.12.1】必须与索引一致的 32 位长度。
+                // 旧版返回全部连续十六进制字符，若 CAB 后面紧跟十六进制字节会多几位，
+                // 与索引里 32 位的 key 对不上，同名消歧直接失效。
+                if (e - i - 4 >= 32) return s.substring(i, i + 4 + 32);
                 if (e - i - 4 >= 20) return s.substring(i, e);
                 i = s.indexOf("CAB-", i + 4);
             }
@@ -234,80 +381,8 @@ final class Patcher {
         return null;
     }
 
-    /** 保留旧签名（已不走模糊匹配），仅供旧调用方使用。 */    /** 结构 → 同名 → 模糊；找不到返回 null。返回值是相对游戏 files 的路径。 */
-    static String locate(String rel, java.util.Set<String> all,
-                         java.util.Map<String, java.util.List<String>> byName,
-                         java.util.Map<String, java.util.List<String>> byNorm) {
-        // ① 结构匹配：包里的相对路径游戏里就有
-        if (all.contains(rel)) return rel;
 
-        int cut = rel.lastIndexOf('/');
-        String name = rel.substring(cut + 1);
-        String dir = cut < 0 ? "" : rel.substring(0, cut);
 
-        // ② 逐级剥皮：把补丁里多包的目录一层层去掉再试
-        //    例：李白/role/x.assetbundle -> role/x.assetbundle -> x.assetbundle
-        String d = dir;
-        while (true) {
-            int p = d.indexOf('/');
-            d = (p < 0) ? "" : d.substring(p + 1);
-            String probe = (d.length() == 0) ? name : (d + "/" + name);
-            if (all.contains(probe)) return probe;
-            if (d.length() == 0) break;
-        }
-
-        // ③ 同名唯一
-        java.util.List<String> same = byName.get(name);
-        if (same != null && same.size() == 1) return same.get(0);
-
-        // ④ 归一化唯一
-        String nm = norm(name);
-        java.util.List<String> fuzzy = byNorm.get(nm);
-        if (same == null && fuzzy != null && fuzzy.size() == 1) return fuzzy.get(0);
-
-        // ⑤ 多处候选：按目录尾部相似度挑最像的（不要盲取第一个）
-        if (same != null && same.size() > 1) return best(same, dir);
-        if (fuzzy != null && fuzzy.size() > 1) return best(fuzzy, dir);
-        if (fuzzy != null && fuzzy.size() == 1) return fuzzy.get(0);
-        return null;
-    }
-
-    /** 候选里挑「目录尾部与补丁路径最像」的；平手取路径更短的。 */
-    private static String best(java.util.List<String> cands, String dir) {
-        String bst = null;
-        int bs = -1;
-        for (String c : cands) {
-            int sc = suffixScore(dirOf(c), dir);
-            if (sc > bs) {
-                bs = sc;
-                bst = c;
-            } else if (sc == bs && bst != null && c.length() < bst.length()) {
-                bst = c;
-            }
-        }
-        return bst;
-    }
-
-    private static String dirOf(String rel) {
-        int i = rel.lastIndexOf('/');
-        return i < 0 ? "" : rel.substring(0, i);
-    }
-
-    /** 两个目录从尾部往前看，有多少层是相同的。 */
-    private static int suffixScore(String a, String b) {
-        if (a == null || b == null || a.length() == 0 || b.length() == 0) return 0;
-        String[] as = a.split("/");
-        String[] bs = b.split("/");
-        int i = as.length - 1;
-        int j = bs.length - 1;
-        int n = 0;
-        while (i >= 0 && j >= 0 && as[i].equalsIgnoreCase(bs[j])) {
-            n++;
-            i--;
-            j--;
-        }
-        return n;
-    }
 
     /**
      * 说明 / 预览类文件：不是游戏资源，定位不到时就别往游戏目录里塞。
@@ -462,25 +537,29 @@ final class Patcher {
             }
 
             // 落到 stage2；一个源文件可以对应多个目标（游戏复用同一资源）
+            //
+            // v3.10 修：旧版第一个目标用 renameTo 把源文件搬走，第二个目标再读源文件
+            // 就 ENOENT（实测 墨姐改歌姬修复/263.assetbundle 只替换了 1 处）。
+            // 现在所有目标一律 copy，源文件在全部目标写完后统一删。
             File src = new File(stage, rel);
-            boolean first = true;
+            boolean anyOk = false;
             for (String dstRel : t.dstRels) {
                 File dst = new File(stage2, dstRel);
                 File parent = dst.getParentFile();
                 if (parent != null && !parent.exists()) parent.mkdirs();
                 try {
-                    if (first) {
-                        if (!src.renameTo(dst)) {
-                            copy(new FileInputStream(src), dst);
-                            src.delete();
-                        }
-                        first = false;
-                    } else {
-                        copy(new FileInputStream(src), dst);
-                    }
+                    copy(new FileInputStream(src), dst);
+                    anyOk = true;
                 } catch (IOException e) {
                     if (report != null) report.add("搬移失败：" + dstRel + " / " + e.getMessage());
                 }
+            }
+            if (anyOk) {
+                src.delete();
+            } else {
+                if (report != null) report.add("✗ 全部目标写入失败：" + rel);
+                miss++;
+                continue;
             }
             ok++;
             if (report != null) {
@@ -587,7 +666,11 @@ final class Patcher {
         sb.append("PUB='").append(pub).append("'\n");
         sb.append("echo \"[$(date '+%H:%M:%S')] 写入目标: $DST (uid=$(id -u))\"\n");
         sb.append("if ! touch \"$DST/.w_preflight\" 2>/dev/null; then echo \"[$(date '+%H:%M:%S')] ✗ 游戏目录当前不可写（挂载点失效），已中止，一个文件都没动: $DST\"; echo \"  处理：重启手机 / 重开 Shizuku 后重试；root 激活可走 /data/media/0\"; exit 7; fi; rm -f \"$DST/.w_preflight\" 2>/dev/null\n");
-        sb.append("if [ -n \"$BK\" ]; then if touch \"$BK/.w_test\" 2>/dev/null; then rm -f \"$BK/.w_test\" 2>/dev/null; else echo \"[$(date '+%H:%M:%S')] ⚠ 备份目录不可写（大概是 root 创建的），本次跳过备份: $BK\"; BK=''; BKM=''; fi; fi\n");
+        // v3.10: touch before mkdir. $BK = 备份文件/<pkg>/原版 which was never created;
+        // touch on a missing path fails for root too -> misreported as not writable.
+        // 结尾必须是 \n（换行），曾误写成 \\n（字面反斜杠+n），
+        // 导致这一行与后面所有语句拼成一行，sh 报 unmatched 'if'。
+        sb.append("if [ -n \"$BK\" ]; then mkd \"$BK\"; if touch \"$BK/.w_test\" 2>/dev/null; then rm -f \"$BK/.w_test\" 2>/dev/null; else echo \"[$(date '+%H:%M:%S')] ⚠ 备份目录建不出来或不可写，本次跳过备份: $BK\"; BK=''; BKM=''; fi; fi\n");
         // 目标目录的属主，拷完把文件 chown 回去，免得游戏读不到
         sb.append("OWNER=$(stat -c '%u:%g' \"$DST\" 2>/dev/null)\n");
         // 带重试的拷/建目录：FUSE 偶尔会 ENOTCONN，重试几次通常就过去了
@@ -597,7 +680,7 @@ final class Patcher {
         sb.append("putmani() { awk -F'\t' -v k=\"$1\" '$1!=k' \"$BKM\" 2>/dev/null > \"$BKM.t\"; printf '%s\t%s\t%s\\n' \"$1\" \"$2\" \"$3\" >> \"$BKM.t\"; mv \"$BKM.t\" \"$BKM\"; }\n");
         sb.append("cd '").append(stage).append("' || { echo \"[$(date '+%Y-%m-%d %H:%M:%S')] ✗ 无法进入解压目录\"; exit 2; }\n");
         sb.append("find . -type f > ./.plist 2>/dev/null\n");
-        sb.append("n=0; ok=0; bad=0; wn=0\n");
+        sb.append("n=0; ok=0; bad=0; wn=0; bk_ok=0; bk_fail=0\n");
         sb.append("while IFS= read -r rel; do\n");
         sb.append("  case \"$rel\" in ./.plist) continue;; esac\n");
         sb.append("  rel=${rel#./}\n");
@@ -606,34 +689,27 @@ final class Patcher {
         sb.append("  d=\"$DST/$rel\"\n");
         sb.append("  dd=\"${d%/*}\"\n");
         sb.append("  case \"$rel\" in *.txt|*.TXT|*.md|*.MD) skipbak=1;; *) skipbak=0;; esac\n");
-        sb.append("  if [ \"$skipbak\" = 0 ] && [ -f \"$d\" ] && [ \"$(cks \"$d\")\" = \"$(cks \"$rel\")\" ]; then\n");
-        sb.append("    echo \"[$(date '+%H:%M:%S')] - $rel 与补丁内容相同，不备份（不是原版）\"\n");
-        sb.append("    skipbak=2\n");
-        sb.append("  fi\n");
-        sb.append("  if [ -n \"$BK\" ] && [ -f \"$d\" ] && [ \"$skipbak\" = 0 ]; then\n");
-        sb.append("    bf=\"$BK/$rel\"\n");
-        sb.append("    if [ -f \"$bf\" ]; then\n");
-        sb.append("      have=$(look \"$rel\"); cur=$(cks \"$bf\")\n");
-        sb.append("      if [ -n \"$have\" ] && [ \"$have\" != \"$cur\" ]; then\n");
-        sb.append("        echo \"[$(date '+%H:%M:%S')] ⚠ 备份校验不符（疑似同名文件顶替），不改写索引，回滚时会拒绝这个文件: $rel\"\n");
-        sb.append("        wn=$((wn+1))\n");
-        sb.append("      elif [ -z \"$have\" ]; then\n");
-        sb.append("        putmani \"$rel\" $cur\n");
-        sb.append("        echo \"[$(date '+%H:%M:%S')] 备份已存在，补记校验索引: $rel\"\n");
-        sb.append("      else\n");
-        sb.append("        if [ \"$cur\" = \"$(cks \"$rel\")\" ]; then\n");
-        sb.append("          echo \"[$(date '+%H:%M:%S')] \u26a0 备份内容和补丁一模一样，这份备份是假的（当初备份到的就是补丁），回滚它等于没回滚: $rel\"\n");
-        sb.append("        else\n");
-        sb.append("          echo \"[$(date '+%H:%M:%S')] 备份已有（校验一致，跳过）: $rel\"\n");
-        sb.append("        fi\n");
-        sb.append("      fi\n");
+        // v3.8：备份判定改成「看备份记录里有没有这条目标路径」，不再看内容是否等于补丁。
+        // 旧逻辑「内容相同就不备份」会让重装过的补丁永远没有原版可还原。
+        sb.append("  if [ \"$skipbak\" = 0 ] && [ -f \"$d\" ] && [ -n \"$BK\" ] && [ ! -f \"$BK/$rel\" ]; then\n");
+        sb.append("    case \"$rel\" in\n");
+        sb.append("      */*) bd=\"$BK/${rel%/*}\";;\n");
+        sb.append("      *) bd=\"$BK\";;\n");
+        sb.append("    esac\n");
+        sb.append("    mkd \"$bd\" 2>/dev/null\n");
+        sb.append("    if put \"$d\" \"$BK/$rel\"; then\n");
+        sb.append("      putmani \"$rel\" $(cks \"$BK/$rel\")\n");
+        sb.append("      bk_ok=$((bk_ok+1))\n");
+        sb.append("      echo \"[$(date '+%H:%M:%S')] 已备份原版 $rel\"\n");
         sb.append("    else\n");
-        sb.append("      case \"$rel\" in */*) bd=\"$BK/${rel%/*}\";; *) bd=\"$BK\";; esac\n");
-        sb.append("      mkd \"$bd\" 2>/dev/null\n");
-        sb.append("      if put \"$d\" \"$bf\"; then\n");
-        sb.append("        putmani \"$rel\" $(cks \"$bf\")\n");
-        sb.append("        echo \"[$(date '+%H:%M:%S')] 已备份原版 $rel\"\n");
-        sb.append("      fi\n");
+        sb.append("      bk_fail=$((bk_fail+1))\n");
+        sb.append("      echo \"[$(date '+%H:%M:%S')] ⚠ 备份失败（继续安装，但这个文件回滚时会缺原版）: $rel\"\n");
+        sb.append("    fi\n");
+        sb.append("  elif [ \"$skipbak\" = 0 ] && [ -n \"$BK\" ] && [ -f \"$BK/$rel\" ]; then\n");
+        sb.append("    have=$(look \"$rel\"); cur=$(cks \"$BK/$rel\")\n");
+        sb.append("    if [ -n \"$have\" ] && [ \"$have\" != \"$cur\" ]; then\n");
+        sb.append("      wn=$((wn+1))\n");
+        sb.append("      echo \"[$(date '+%H:%M:%S')] ⚠ 备份校验不符（保留原索引，回滚会跳过）: $rel\"\n");
         sb.append("    fi\n");
         sb.append("  fi\n");
         sb.append("  if mkd \"$dd\" && put \"$rel\" \"$d\"; then\n");
@@ -653,6 +729,7 @@ final class Patcher {
         sb.append("done < ./.plist\n");
         sb.append("if [ \"$wn\" -gt 0 ]; then echo \"[$(date '+%H:%M:%S')] ⚠ 有 $wn 个文件的备份校验不符，已保留原索引，回滚会跳过它们\"; fi\n");
         sb.append("if [ \"$n\" -eq 0 ]; then echo \"[$(date '+%H:%M:%S')] ⚠ 这个补丁一个文件都没部署：zip 里可能没有 files/ 目录结构\"; fi\n");
+        sb.append("echo \"[$(date '+%H:%M:%S')] --- 备份：本次新增 $bk_ok 个，失败 $bk_fail 个（目标: ${BK:-无}）\"\n");
         sb.append("echo \"[$(date '+%Y-%m-%d %H:%M:%S')] --- 合计 $n 个文件：成功 $ok，失败 $bad\"\n");
         sb.append("if [ \"$bad\" -gt 0 ]; then echo \"[$(date '+%H:%M:%S')] ⚠ 有 $bad 个文件没写进去（常见原因：挂载点中途失效）\"; exit 8; fi\n");
         sb.append("exit 0\n");
@@ -688,17 +765,25 @@ final class Patcher {
         sb.append("      if rm -rf \"$d\"; then echo \"[$(date '+%H:%M:%S')] ✓ 已删除 $b（${sz} KB）\"; n=$((n+1)); fi\n");
         sb.append("      ;;\n");
         sb.append("    *)\n");
+        // 备份实际在 备份文件/<包名>/原版/，包名目录不能被当成“不是备份目录”留下
+        sb.append("      if [ -d \"$d/原版\" ]; then\n");
         if (keepOriginal) {
-            sb.append("      echo \"[$(date '+%H:%M:%S')] - 保留 $b\"\n");
+            sb.append("        echo \"[$(date '+%H:%M:%S')] - 保留 $b/原版\"\n");
         } else {
-            // 全部删除时也只认「原版」目录，别的东西不碰
-            sb.append("      if [ \"$b\" = \"原版\" ]; then\n");
+            sb.append("        sz=$(du -sk \"$d/原版\" 2>/dev/null | awk '{print $1}')\n");
+            sb.append("        if rm -rf \"$d/原版\"; then echo \"[$(date '+%H:%M:%S')] ✓ 已删除 $b/原版（${sz} KB）\"; n=$((n+1)); fi\n");
+            sb.append("        rmdir \"$d\" 2>/dev/null\n");
+        }
+        sb.append("      elif [ \"$b\" = \"原版\" ]; then\n");
+        if (keepOriginal) {
+            sb.append("        echo \"[$(date '+%H:%M:%S')] - 保留 $b\"\n");
+        } else {
             sb.append("        sz=$(du -sk \"$d\" 2>/dev/null | awk '{print $1}')\n");
             sb.append("        if rm -rf \"$d\"; then echo \"[$(date '+%H:%M:%S')] ✓ 已删除 $b（${sz} KB）\"; n=$((n+1)); fi\n");
-            sb.append("      else\n");
-            sb.append("        echo \"[$(date '+%H:%M:%S')] - 保留 $b（不是备份目录）\"\n");
-            sb.append("      fi\n");
         }
+        sb.append("      else\n");
+        sb.append("        echo \"[$(date '+%H:%M:%S')] - 保留 $b（不是备份目录）\"\n");
+        sb.append("      fi\n");
         sb.append("      ;;\n");
         sb.append("  esac\n");
         sb.append("done\n");
@@ -765,23 +850,26 @@ final class Patcher {
         sb.append("    bad=$((bad+1))\n");
         sb.append("  fi\n");
         sb.append("}\n");
+        sb.append("TM=\"$BK/.restore_$$\"\n");
+        sb.append(": > \"$TM.mdone\"\n");
         sb.append("if [ -f \"$BKM\" ]; then\n");
         sb.append("  T=$(printf '\\t')\n");
         sb.append("  while IFS=\"$T\" read -r rel mc ms; do\n");
         sb.append("    case \"$rel\" in ''|'#'*) continue;; esac\n");
+        sb.append("    printf '%s\\n' \"$rel\" >> \"$TM.mdone\"\n");
         sb.append("    [ -z \"$mc\" ] && do_one \"$rel\" \"\" || do_one \"$rel\" \"$mc $ms\"\n");
         sb.append("  done < \"$BKM\"\n");
-        sb.append("else\n");
-        sb.append("  echo \"[$(date '+%H:%M:%S')] 没有校验索引，按备份目录里的文件整体还原\"\n");
-        sb.append("  cd \"$BK\" || exit 2\n");
-        sb.append("  find . -type f ! -name '.manifest.tsv' > ./.rlist 2>/dev/null\n");
-        sb.append("  while IFS= read -r rel; do\n");
-        sb.append("    rel=${rel#./}\n");
-        sb.append("    [ -z \"$rel\" ] && continue\n");
-        sb.append("    do_one \"$rel\" \"\"\n");
-        sb.append("  done < ./.rlist\n");
-        sb.append("  rm -f ./.rlist\n");
         sb.append("fi\n");
+        // 索引缺失时，备份目录里没进索引的文件也要还原，否则回滚只还原一半
+        sb.append("find \"$BK\" -type f ! -name '.manifest.tsv' ! -name '.restore_*' > \"$TM.rlist\" 2>/dev/null\n");
+        sb.append("while IFS= read -r f; do\n");
+        sb.append("  rel=${f#$BK/}\n");
+        sb.append("  [ -z \"$rel\" ] && continue\n");
+        sb.append("  grep -qxF \"$rel\" \"$TM.mdone\" 2>/dev/null && continue\n");
+        sb.append("  echo \"[$(date '+%H:%M:%S')] ℹ 未索引备份，按文件还原: $rel\"\n");
+        sb.append("  do_one \"$rel\" \"\"\n");
+        sb.append("done < \"$TM.rlist\"\n");
+        sb.append("rm -f \"$TM.mdone\" \"$TM.rlist\" 2>/dev/null\n");
         sb.append("echo \"[$(date '+%Y-%m-%d %H:%M:%S')] --- 回滚结束：还原 $ok 个，跳过 $sk 个，失败 $bad 个\"\n");
         sb.append("if [ \"$bad\" -gt 0 ]; then echo \"[$(date '+%H:%M:%S')] ⚠ 有 $bad 个文件没还原成功\"; exit 8; fi\n");
         sb.append("exit 0\n");
@@ -917,7 +1005,11 @@ final class Patcher {
     }
 
     static String shQuote(String s) {
-        return s.replace("\\", "\\\\").replace("\"", "\\\"");
+        // 生成的是双引号内嵌 shell 文本：反斜杠、双引号、$、反引号都要转义
+        return s.replace("\\", "\\\\")
+                .replace("\"", "\\\"")
+                .replace("$", "\\$")
+                .replace("`", "\\`");
     }
 
     interface Progress {

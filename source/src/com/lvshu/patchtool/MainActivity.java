@@ -132,7 +132,7 @@ public class MainActivity extends Activity {
             Shizuku.addRequestPermissionResultListener(permListener);
         } catch (Throwable ignored) {
         }
-        log("酸败补丁助手 v3.6 已启动。");
+        log("酸败补丁助手 v3.12 已启动。");
         log("两条通道任选其一：① 授权 Shizuku，或在配置里勾「优先用 root」→ ② 所有文件访问 → ③ 一键安装。");
         refreshStatus();
         refreshBackupHint();
@@ -295,7 +295,7 @@ public class MainActivity extends Activity {
         cfg.addView(cbRoot, lp(-1, -2, 0, 0, 0, 4));
 
         cbBackup = new CheckBox(this);
-        cbBackup.setText("覆盖前备份原版到「备份文件/原版/」（只存一份，重复跑不会覆盖）");
+        cbBackup.setText("覆盖前备份到「备份文件/<包名>/原版/」（只存一份，重复跑不会覆盖）");
         cbBackup.setTextSize(13);
         cbBackup.setTextColor(C_TEXT);
         cbBackup.setButtonTintList(android.content.res.ColorStateList.valueOf(C_PRIMARY));
@@ -738,24 +738,35 @@ public class MainActivity extends Activity {
             toast("没有备份目录，不用清理：" + bkRoot.getAbsolutePath());
             return;
         }
-        final File orig = new File(bkRoot, "原版");
-        final long origSize = dirSize(orig);
-        final int origFiles = countFiles(orig);
+        // 实际备份在 备份文件/<包名>/原版/，老版本还可能留在 备份文件/原版/
+        final File legacyOrig = new File(bkRoot, "原版");
+        long origSize = dirSize(legacyOrig);
+        int origFiles = countFiles(legacyOrig);
+        int pkgDirs = 0;
         int oldCount = 0;
         long oldSize = 0;
         File[] subs = bkRoot.listFiles();
         if (subs != null) {
             for (File f : subs) {
-                if (f.isDirectory() && f.getName().matches("\\d{8}_\\d{6}")) {
+                if (!f.isDirectory()) continue;
+                if (f.getName().matches("\\d{8}_\\d{6}")) {
                     oldCount++;
                     oldSize += dirSize(f);
+                } else {
+                    File o = new File(f, "原版");
+                    if (o.isDirectory()) {
+                        pkgDirs++;
+                        origFiles += countFiles(o);
+                        origSize += dirSize(o);
+                    }
                 }
             }
         }
         final String msg = "备份文件/ 里现在有：\n\n"
-                + "· 原版（可回滚）：" + origFiles + " 个文件，" + mb(origSize) + "\n"
+                + "· 原版（可回滚）：" + origFiles + " 个文件，" + mb(origSize)
+                + (pkgDirs > 0 ? "（" + pkgDirs + " 个包名目录）" : "") + "\n"
                 + "· 旧时间戳目录：" + oldCount + " 个，共 " + mb(oldSize) + "\n\n"
-                + "「删旧目录」只清旧备份、保留原版；\n"
+                + "「删旧目录」只清旧备份、保留各包名下的原版；\n"
                 + "「全部删除」连原版一起清掉 —— 之后就没法一键回滚了。";
         new AlertDialog.Builder(this)
                 .setTitle("一键清理备份")
@@ -811,7 +822,7 @@ public class MainActivity extends Activity {
         });
     }
 
-    /** 一键回滚原版：先确认，再从「备份文件/原版」按索引还原。 */
+    /** 一键回滚原版：先确认，再从「备份文件/<包名>/原版」按索引还原。 */
     private void confirmRestore() {
         if (busy) {
             toast("正在跑，别急");
@@ -829,7 +840,7 @@ public class MainActivity extends Activity {
         }
         new AlertDialog.Builder(this)
                 .setTitle("一键回滚原版？")
-                .setMessage("会把「备份文件/原版」里的原始文件按原路径覆盖回游戏目录。\n\n建议先退出游戏再回滚。")
+                .setMessage("会把「备份文件/<包名>/原版」里的原始文件按原路径覆盖回游戏目录。\n\n建议先退出游戏再回滚。")
                 .setNegativeButton("取消", null)
                 .setPositiveButton("回滚", new DialogInterface.OnClickListener() {
                     @Override
@@ -982,6 +993,11 @@ public class MainActivity extends Activity {
         if (n > 0) postLog("已清理临时残留 " + n + " 项");
     }
 
+
+
+
+
+
     /**
      * 用 shell 列出游戏资源目录里的文件（相对游戏 files 的路径）。
      * 应用进程看不到 Android/data，只能让 shell 帮我们列。
@@ -1041,8 +1057,12 @@ public class MainActivity extends Activity {
                 postLog(message);
             }
         }, report);
-        for (String line : report) log(line);
-        log("定位结果：成功 " + r[0] + " 个，跳过 " + r[1] + " 个（游戏资源共 " + rels.size() + " 个）");
+        // P1：定位明细（含每个文件为什么跳过）必须落盘，否则弹窗说“看日志”却查不到
+        blog("[定位] ===== 开始定位 =====");
+        for (String line : report) blog("[定位] " + line);
+        blog("[定位] 结果：成功 " + r[0] + " 个，跳过 " + r[1]
+                + " 个（游戏资源共 " + rels.size() + " 个，CAB 索引 "
+                + (cabMap == null ? "未建" : cabMap.size() + " 条") + "）");
 
         // 一个文件都没落进来时目录可能不存在，不能直接拿去 cd（会报 No such file or directory）
         if (!stage2.isDirectory() || !hasAnyFile(stage2)) {
@@ -1055,19 +1075,25 @@ public class MainActivity extends Activity {
     /**
      * 加载游戏 CAB 索引（缓存优先）。
      *
-     * 缓存位置：<rootStr>/缓存/资源索引/——全部在用户设定目录下，不越界。
-     * 失效条件：游戏目录变了 / assetbundle 目录 mtime 变了。
+     * v3.8：按包名分目录存放，因为同一个游戏不同渠道服包名不同
+     * （com.jumpw.mobile300 / com.jumpw.mobile.aligames …）。
+     * 旧版把所有服平铺成 _storage_emulated_0_… 的 .tsv，看不出归属，
+     * 也分不清换服时该复用还是重建。
+     *
+     * 目录：<rootStr>/缓存/资源索引/<包名>/{index.tsv, meta.txt}
+     * 失效条件：assetbundle 目录 mtime 变了。
      */
     private Map<String, List<String>> loadCabIndex(String gameStr, File tmpRoot, String rootStr) {
-        File dir = new File(new File(rootStr, "缓存"), "资源索引");
+        File dir = indexDir(rootStr, gameStr);
         if (!dir.isDirectory() && !dir.mkdirs()) {
-            log("! 建不了缓存目录，跳过 CAB 校验：" + dir);
+            blog("[索引] ✗ 建不了缓存目录，跳过 CAB 校验：" + dir);
             return null;
         }
+        String pkg = pkgOf(gameStr);
+        File tsv = new File(dir, "index.tsv");
+        File meta = new File(dir, "meta.txt");
 
-        String key = gameStr.replaceAll("[^A-Za-z0-9._-]", "_");
-        File tsv = new File(dir, key + ".tsv");
-        File meta = new File(dir, key + ".meta");
+        blog("[索引] 包名 " + (pkg == null ? "(未知)" : pkg) + "  目录 " + dir.getAbsolutePath());
 
         long gameMtime = dirMtime(gameStr + "/data/android/assetbundle", tmpRoot);
         if (tsv.isFile() && meta.isFile()) {
@@ -1077,32 +1103,91 @@ public class MainActivity extends Activity {
             } catch (IOException e) {
                 m = "";
             }
-            if (m.startsWith("mtime=" + gameMtime) && gameMtime > 0) {
+            if (m.contains("mtime=" + gameMtime) && gameMtime > 0) {
                 Map<String, List<String>> cached = readCabTsv(tsv);
                 if (cached != null && !cached.isEmpty()) {
-                    log("已读取资源索引缓存（" + cached.size() + " 条），免扫描");
+                    blog("[索引] 命中缓存 " + cached.size() + " 条，免扫描");
                     return cached;
                 }
+                blog("[索引] 缓存存在但内容为空，重建");
+            } else {
+                blog("[索引] 缓存失效（abroot mtime=" + gameMtime + " 与记录不符），重建");
             }
+        } else {
+            blog("[索引] 该渠道服还没有索引，开始建表");
         }
 
-        log("首次需要建立资源索引（读取游戏里每个 ab 的内部标识），大概要等 1~2 分钟…");
-        log("建好后会存在：" + dir.getAbsolutePath());
-        log("下次安装直接用缓存，不用再等。");
+        // 同一个包本次运行内建表失败过，就不再重试。
+        // 否则 3 个补丁会把 26,218 个文件扫 3 遍（实测 3 × 约 24 分钟）。
+        if (failedIndexPkgs.contains(pkg)) {
+            blog("[索引] 包 " + pkg + " 本次已建表失败过，跳过重扫（避免重复耗时）");
+            return null;
+        }
 
-        Map<String, List<String>> map = buildCabIndex(gameStr, tmpRoot, tsv);
+        long t0 = System.currentTimeMillis();
+        Map<String, List<String>> map = buildCabIndex(gameStr, tmpRoot, dir);
+        long cost = (System.currentTimeMillis() - t0) / 1000L;
+        if (map == null || map.isEmpty()) {
+            failedIndexPkgs.add(pkg);
+        }
         if (map != null && !map.isEmpty()) {
             try {
-                writeText(meta, "mtime=" + gameMtime + "\ncount=" + map.size()
+                writeText(meta, "pkg=" + pkg
+                        + "\ngame=" + gameStr
+                        + "\nmtime=" + gameMtime
+                        + "\ncount=" + map.size()
+                        + "\ncost=" + cost + "s"
                         + "\ntime=" + new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.ROOT).format(new Date())
                         + "\n");
             } catch (Throwable ignored) {
             }
-            log("资源索引建好了：" + map.size() + " 条");
+            blog("[索引] ✓ 建表完成 " + map.size() + " 条，耗时 " + cost + "s → " + tsv.getName());
         } else {
-            log("! 资源索引建立失败，本次按同名唯一 / 精确路径定位");
+            blog("[索引] ✗ 建表失败或为空，本次按同名唯一 / 精确路径定位");
         }
         return map;
+    }
+
+    /**
+     * 当前这次安装的日志文件；null 表示没有文件可写。
+     *
+     * 旧版只有 log() 进界面，fileLog() 才落盘，建索引那十几分钟文件日志是空白，
+     * 事后完全查不到卡在哪。关键阶段一律走 blog()。
+     */
+    private File currentLog;
+
+    /** 本次运行内建表失败过的包名，避免对每个补丁都重扫一遍。 */
+    private final java.util.Set<String> failedIndexPkgs = new java.util.HashSet<String>();
+
+    /** 同时写界面日志和日志文件。 */
+    private void blog(String line) {
+        log(line);
+        File lf = currentLog;
+        if (lf != null) {
+            try {
+                fileLog(lf, line);
+            } catch (Throwable ignored) {
+            }
+        }
+    }
+
+    /** 从游戏目录取包名：…/Android/data/<pkg>/files → <pkg>。 */
+    static String pkgOf(String gameStr) {
+        if (gameStr != null) {
+            java.util.regex.Matcher m = java.util.regex.Pattern
+                    .compile("/Android/data/([^/]+)").matcher(gameStr);
+            if (m.find()) return m.group(1);
+        }
+        return null;
+    }
+
+    /** 索引目录：按包名隔离，不同渠道服互不覆盖。 */
+    private File indexDir(String rootStr, String gameStr) {
+        String pkg = pkgOf(gameStr);
+        if (pkg == null || pkg.length() == 0) {
+            pkg = "_unknown_" + new File(gameStr).getName();
+        }
+        return new File(new File(new File(rootStr, "缓存"), "资源索引"), pkg);
     }
 
     /** 目录的修改时间（毫秒）；失败返回 0。 */
@@ -1149,36 +1234,156 @@ public class MainActivity extends Activity {
         return m;
     }
 
-    /** 扫游戏目录，建「CAB → 相对路径列表」表。 */
-    private Map<String, List<String>> buildCabIndex(String gameStr, File tmpRoot, File tsv) {
-        File raw = new File(tmpRoot, ".cabout");
+    /**
+     * 扫游戏目录，建「CAB → 相对路径列表」表。
+     *
+     * v3.8 提速：旧版每个文件跑 head|sed|grep|head 四次 fork，26184 个文件
+     * 约 13 万次进程创建，实测 26.5 条/秒（16 分 29 秒）。
+     * 新脚本改成 find 出清单 + xargs 每 64 个一批，fork 降到几百次；
+     * 判定规则完全不变（前 8 KB、第一处 CAB- + 至少 20 位十六进制）。
+     *
+     * 扫盘在 shell 侧跑，Shizuku(uid=2000) 和 root 都能用，不依赖 uid=0。
+     */
+    private Map<String, List<String>> buildCabIndex(String gameStr, File tmpRoot, File dir) {
+        File raw = new File(dir, "index.tsv.tmp");
+        File chk = new File(dir, "index.chk.tmp");
+        // 清掉上次残留，包括两种通道的转存副本。
+        // Shizuku 身份可能删不掉 root 建的文件，这里删不掉也不致命——
+        // 脚本开头会再 rm + 校验目录可写，失败会明确报错退出。
         raw.delete();
+        chk.delete();
+        new File(dir, "index.tsv.tmp.local.tsv").delete();
+        new File(dir, "index.tsv.tmp.local.chk").delete();
+        new File(getFilesDir(), "index_result.tsv").delete();
+        new File(getFilesDir(), "index_result.chk").delete();
         File sh = new File(tmpRoot, "cab_" + System.currentTimeMillis() + ".sh");
-        String body = "#!/system/bin/sh\n"
-                + "G=" + Patcher.shQuote(gameStr + "/data/android/assetbundle") + "\n"
-                + "O=" + Patcher.shQuote(raw.getAbsolutePath()) + "\n"
-                + ": > \"$O\" || exit 2\n"
-                + "find \"$G\" -type f -name '*.assetbundle' 2>/dev/null | while IFS= read -r f; do\n"
-                + "  c=$(head -c 8192 \"$f\" 2>/dev/null | sed 's/[^[:print:]]/\n/g'"
-                + " | grep -a -o 'CAB-[0-9a-fA-F][0-9a-fA-F]*' | head -1)\n"
-                + "  [ -n \"$c\" ] && printf '%s\\t%s\\n' \"$c\" \"$f\"\n"
-                + "done >> \"$O\"\n"
-                + "echo IDX_DONE\n";
+        String body = Patcher.buildCabIndexScript(gameStr, raw, true);
         try {
             writeText(sh, body);
             sh.setReadable(true, false);
-            Shell.runScript(sh.getAbsolutePath());
-        } catch (Throwable e) {
-            log("! 建索引失败：" + e);
-        } finally {
-            sh.delete();
+            blog("[索引] 开始扫描（" + Shell.desc() + "）…");
+        } catch (IOException e) {
+            blog("[索引] ✗ 生成扫描脚本失败：" + e.getMessage());
+            return null;
+        }
+
+        // 后台跑脚本，主线程轮询进度，避免界面看起来卡死
+        final File outFile = raw;
+        final String shPath = sh.getAbsolutePath();
+        final long t0 = System.currentTimeMillis();
+        Thread runner = new Thread(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    int rc = Shell.runScript(shPath);
+                    if (rc != 0) blog("[索引] ⚠ 扫描脚本退出码 " + rc);
+                } catch (Throwable t) {
+                    blog("[索引] ⚠ 扫描异常：" + t);
+                }
+            }
+        }, "cab-scan");
+        runner.start();
+
+        long lastLines = -1;
+        long lastTick = 0;
+        while (runner.isAlive()) {
+            sleep(1000);
+            long el = (System.currentTimeMillis() - t0) / 1000L;
+            long lines = countLines(outFile);
+            // 每 5 秒或条数有变化就报一次，界面不会看起来卡死
+            if (lines != lastLines && (el - lastTick >= 5 || lines % 1000 == 0)) {
+                lastLines = lines;
+                lastTick = el;
+                blog("[索引] 进行中 " + lines + " 条，已用 " + el + "s"
+                        + (el > 0 ? "（约 " + (lines / el) + " 条/秒）" : ""));
+            }
+            if (el > 1800) {
+                blog("[索引] ⚠ 超过 30 分钟未完成，可能卡住（已扫 " + lines + " 条）");
+                break;
+            }
+        }
+        // 等线程真正结束
+        try {
+            runner.join(2000);
+        } catch (InterruptedException ignored) {
+        }
+
+        long cost = (System.currentTimeMillis() - t0) / 1000L;
+
+        // 【关键】改从 App 私有目录读结果。
+        // 实测：shell 把结果写在 /storage/emulated/0/... 下，文件确实存在、
+        // 大小也对，但 App 进程 readText() 读出来是空（FUSE 可见性问题）。
+        // 脚本末尾会把成品拷到私有目录，这里优先读那份副本。
+        // 【双通道兼容】按顺序尝试三个来源：
+        //   ① App 私有目录（root 通道会转存到这里）
+        //   ② 索引目录下的 .local.tsv（Shizuku 通道会转存到这里）
+        //   ③ 原始位置 outFile（最后兜底）
+        File privateCopy = new File(getFilesDir(), "index_result.tsv");
+        File privateChk = new File(getFilesDir(), "index_result.chk");
+        File localCopy = new File(dir, outFile.getName() + ".local.tsv");
+        File localChk = new File(dir, outFile.getName() + ".local.chk");
+        File srcOut = privateCopy;
+        File srcChk = privateChk;
+
+        long produced = countLines(srcOut);
+        if (produced == 0) {
+            long privSize = privateCopy.isFile() ? privateCopy.length() : -1;
+            long localLines = countLines(localCopy);
+            blog("[索引] 私有副本不可用（size=" + privSize + "），索引目录副本 " + localLines + " 行");
+            if (localLines > 0) {
+                srcOut = localCopy;
+                srcChk = localChk;
+                produced = localLines;
+            }
+        }
+        if (produced == 0) {
+            long rawLines = countLines(outFile);
+            if (rawLines > 0) {
+                blog("[索引] 两个副本都不可用，回退读原始位置 " + rawLines + " 行");
+                srcOut = outFile;
+                srcChk = chk;
+                produced = rawLines;
+            }
+        }
+        blog("[索引] 扫描结束，耗时 " + cost + "s，产出 " + produced + " 行");
+
+        // 硬校验：一次真实扫描不可能几百毫秒就结束，也不可能产出 0 行。
+        // 出现这种情况多半是脚本本身有问题（比如 find 与 xargs 分隔符不匹配），
+        // 必须明确报错，不能静静退化成“按同名唯一定位”。
+        if (produced == 0) {
+            blog("[索引] ✗ 产出为空：脚本可能执行失败（耗时 " + cost + "s）。"
+                    + "请检查 临时解压/cab_*.sh 与 index.tsv.tmp.chk 是否正常");
+        } else if (cost <= 2 && produced < 200) {
+            blog("[索引] ⚠ 仅 " + cost + "s 就结束且只有 " + produced
+                    + " 条，明显异常（可能参数分隔符不匹配）");
+        }
+
+        // 抽样自检：新旧算法结果对不上就不信任新索引
+        try {
+            if (srcChk.isFile() && srcChk.length() > 0) {
+                int same = 0;
+                int diff = 0;
+                java.util.Set<String> newSet = readLines(srcOut);
+                for (String l : readLines(srcChk)) {
+                    if (newSet.contains(l)) same++;
+                    else diff++;
+                }
+                if (diff == 0) {
+                    blog("[索引] 自检通过（抽样 " + (same + diff) + " 条全部一致）");
+                } else {
+                    blog("[索引] ⚠ 自检不一致：一致 " + same + "、不一致 " + diff + "，请把日志发我");
+                }
+            } else if (produced > 0) {
+                blog("[索引] 自检文件为空，未校验等价性");
+            }
+        } catch (Throwable ignored) {
         }
 
         Map<String, List<String>> m = new HashMap<String, List<String>>();
         String prefix = gameStr + "/";
         StringBuilder out = new StringBuilder(256 * 1024);
         try {
-            for (String line : readText(raw).split("\n")) {
+            for (String line : readText(srcOut).split("\n")) {
                 if (line.length() == 0) continue;
                 int t = line.indexOf('\t');
                 if (t <= 0) continue;
@@ -1194,20 +1399,66 @@ public class MainActivity extends Activity {
                 l.add(rel);
                 out.append(cab).append('\t').append(rel).append('\n');
             }
-            if (out.length() > 0) writeText(tsv, out.toString());
+            if (out.length() > 0) writeText(new File(dir, "index.tsv"), out.toString());
         } catch (Throwable e) {
-            log("! 读索引失败：" + e);
+            blog("[索引] ✗ 解析结果失败：" + e);
         }
-        raw.delete();
+        // 只在真正拿到结果时才清临时文件；失败则保留现场，方便排查。
+        if (!m.isEmpty()) {
+            raw.delete();
+            chk.delete();
+        } else {
+            blog("[索引] 临时文件已保留（便于排查）: " + raw.getAbsolutePath());
+        }
+        sh.delete();
         return m;
     }
+
+    private long countLines(File f) {
+        if (f == null || !f.isFile()) return 0;
+        java.io.BufferedReader r = null;
+        long n = 0;
+        try {
+            r = new java.io.BufferedReader(new InputStreamReader(new FileInputStream(f), "UTF-8"));
+            while (r.readLine() != null) n++;
+        } catch (Throwable ignored) {
+        } finally {
+            try {
+                if (r != null) r.close();
+            } catch (Throwable ignored) {
+            }
+        }
+        return n;
+    }
+
+    private java.util.Set<String> readLines(File f) {
+        java.util.Set<String> s = new java.util.HashSet<String>();
+        if (f == null || !f.isFile()) return s;
+        java.io.BufferedReader r = null;
+        try {
+            r = new java.io.BufferedReader(new InputStreamReader(new FileInputStream(f), "UTF-8"));
+            String line;
+            while ((line = r.readLine()) != null) {
+                if (line.length() > 0) s.add(line);
+            }
+        } catch (Throwable ignored) {
+        } finally {
+            try {
+                if (r != null) r.close();
+            } catch (Throwable ignored) {
+            }
+        }
+        return s;
+    }
+
+
 
     /** 上一次安装里被跳过的文件（给完成弹窗提示用）。 */
     private List<String> lastSkip = new ArrayList<String>();
 
     /**
      * 跳过的文件只做一行提示，不另弹窗。
-     * 用户看到后可以自己去「操作日志」里查具体原因。
+     * 具体原因已由 mapStage() 写进操作日志的 [定位] 段，这里只说去哪看。
      */
     private String skipTip(List<String> skipped) {
         if (skipped == null || skipped.isEmpty()) return "";
@@ -1220,7 +1471,7 @@ public class MainActivity extends Activity {
         if (skipped.size() > lim) {
             sb.append("\n  ……还有 ").append(skipped.size() - lim).append(" 个");
         }
-        sb.append("\n\n具体原因看「操作日志」里的定位记录。");
+        sb.append("\n\n具体原因见「操作日志」里的 [定位] 记录。");
         return sb.toString();
     }
 
@@ -1235,73 +1486,10 @@ public class MainActivity extends Activity {
         return false;
     }
 
-    /** 安装单个 zip（在线补丁用），返回脚本退出码。 */
-    private int runOneZip(File zip, String rootStr, String gameStr, boolean backup) {
-        File root = new File(rootStr);
-        File logDir = new File(root, "操作日志");
-        logDir.mkdirs();
-        String stamp = new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.ROOT).format(new Date());
-        File logFile = new File(logDir, "install_" + stamp + ".log");
-        File tmpRoot = new File(root, "临时解压");
-        tmpRoot.mkdirs();
-        pruneTmp(tmpRoot);
-        File backupBase = backup ? backupOrig(rootStr, gameStr) : null;
 
-        fileLog(logFile, "补丁目录：" + zip.getParent());
-        fileLog(logFile, "游戏目录：" + gameStr);
-        fileLog(logFile, "来源：在线下载");
 
-        File stage = new File(tmpRoot, stamp + "_1");
-        deleteRecursive(stage);
-        int n;
-        try {
-            n = Patcher.extract(zip, stage, new Patcher.Progress() {
-                @Override
-                public void onProgress(String message) {
-                    postLog(message);
-                }
-            });
-        } catch (IOException e) {
-            log("✗ 解压失败: " + e.getMessage());
-            fileLog(logFile, "✗ 解压失败: " + e.getMessage());
-            deleteRecursive(stage);
-            return -1;
-        }
-        log("解压完成：" + n + " 个文件");
-        fileLog(logFile, "解压完成：" + n + " 个文件");
 
-        List<String> skipped = new ArrayList<String>();
-        lastSkip = skipped;   // 给完成弹窗提示用
-        File useStage = mapStage(stage, tmpRoot, gameStr, stamp + "_1", rootStr, skipped);
-        if (useStage == null) {
-            log("✗ 这个补丁里没有能装的文件，已跳过");
-            fileLog(logFile, "✗ 这个补丁里没有能装的文件，已跳过");
-            deleteRecursive(stage);
-            return -2;
-        }
-        fileLog(logFile, "已按游戏路径重排（定位见下）");
 
-        File script = new File(tmpRoot, "run_" + stamp + "_1.sh");
-        boolean direct = Shell.uid() == 0;
-        try {
-            writeText(script, Patcher.buildInstallScript(zip.getName(), useStage, new File(gameStr),
-                    backupBase, logFile, direct));
-            script.setReadable(true, false);
-        } catch (IOException e) {
-            log("✗ 生成脚本失败: " + e.getMessage());
-            deleteRecursive(stage);
-            return -1;
-        }
-        log("开始部署（" + Shell.desc() + " → " + gameStr + "）…");
-        int rc = runAndTail(script, logFile);
-        log("退出码: " + rc);
-        fileLog(logFile, "退出码: " + rc);
-        if (rc == 0) markInstalled(zip.getParentFile(), zip);
-        deleteRecursive(stage);
-        if (useStage != null && !useStage.equals(stage)) deleteRecursive(useStage);
-        script.delete();
-        return rc;
-    }
 
     private void doInstall() {
         if (busy) {
@@ -1358,9 +1546,12 @@ public class MainActivity extends Activity {
                 pruneTmp(tmpRoot);
                 File backupBase = backup ? backupOrig(rootStr, gameStr) : null;
 
-                fileLog(logFile, "补丁目录：" + patchStr);
-                fileLog(logFile, "游戏目录：" + gameStr);
-                fileLog(logFile, "共 " + zips.size() + " 个补丁待处理");
+                currentLog = logFile;   // 让 blog() 从这一刻开始就双重写入
+                failedIndexPkgs.clear();  // 新一轮安装重新允许建表
+                blog("补丁目录：" + patchStr);
+                blog("游戏目录：" + gameStr);
+                blog("执行方式：" + Shell.desc());
+                blog("共 " + zips.size() + " 个补丁待处理");
 
                 final List<String> skippedAll = new ArrayList<String>();
                 int index = 0;
@@ -1389,8 +1580,7 @@ public class MainActivity extends Activity {
 
                     File useStage = mapStage(stage, tmpRoot, gameStr, stamp + "_" + index, rootStr, skippedAll);
                     if (useStage == null) {
-                        log("✗ 这个补丁里没有能装的文件，跳过");
-                        fileLog(logFile, "✗ 这个补丁里没有能装的文件，跳过");
+                        blog("✗ 这个补丁里没有能装的文件，跳过：" + zip.getName());
                         deleteRecursive(stage);
                         continue;
                     }
@@ -1408,9 +1598,12 @@ public class MainActivity extends Activity {
                     }
                     log("开始部署（Shizuku → " + gameStr + "）…");
                     int rc = runAndTail(script, logFile);
-                    log("退出码: " + rc);
-                    fileLog(logFile, "退出码: " + rc);
-                    if (rc == 0) markInstalled(patchDir, zip);
+                    blog("退出码: " + rc);
+                    if (rc == 0) {
+                        // 从本次日志里数出成功写入的文件数，一并记进清单
+                        int wrote = numFromLog(logFile, "合计 (\\d+) 个文件");
+                        markInstalled(patchDir, zip, gameStr, wrote);
+                    }
                     deleteRecursive(stage);
                     if (useStage != null && !useStage.equals(stage)) deleteRecursive(useStage);
                     script.delete();
@@ -1822,9 +2015,26 @@ public class MainActivity extends Activity {
         return dir;
     }
 
-    /** 安装成功后，把这个 zip 记进「已安装」清单。 */
+    /**
+     * 安装成功后，把这个 zip 记进「已安装」清单。
+     *
+     * v3.8：按游戏包名分文件，否则官服和渠道服会混在同一张表里：
+     *   <补丁目录>/.已安装/<包名>.tsv
+     *     zip名 <TAB> 安装时间 <TAB> 游戏目录 <TAB> 写入文件数
+     *
+     * 旧的单文件 <补丁目录>/.已安装.tsv 不再写入，但读旧记录的代码保留兼容。
+     */
     private void markInstalled(File patchDir, File zip) {
-        File idx = new File(patchDir, ".已安装.tsv");
+        markInstalled(patchDir, zip, text(etGame, DEF_GAME), -1);
+    }
+
+    private void markInstalled(File patchDir, File zip, String gameStr, int written) {
+        String pkg = pkgOf(gameStr);
+        if (pkg == null || pkg.length() == 0) pkg = "_unknown";
+        File dir = new File(patchDir, ".已安装");
+        if (!dir.isDirectory()) dir.mkdirs();
+        File idx = new File(dir, pkg + ".tsv");
+
         List<String> keep = new ArrayList<String>();
         BufferedReader r = null;
         try {
@@ -1843,48 +2053,69 @@ public class MainActivity extends Activity {
             } catch (Throwable ignored) {
             }
         }
-        keep.add(zip.getName() + "\t" + new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.ROOT).format(new Date()));
+        keep.add(zip.getName() + "\t"
+                + new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.ROOT).format(new Date())
+                + "\t" + gameStr
+                + "\t" + (written < 0 ? "?" : String.valueOf(written)));
         StringBuilder sb = new StringBuilder();
         for (String l : keep) sb.append(l).append('\n');
         try {
             writeText(idx, sb.toString());
+            blog("[安装清单] 已记录 · 包名 " + pkg + " · " + zip.getName()
+                    + " → " + idx.getAbsolutePath());
         } catch (IOException e) {
-            log("\u26a0 写入安装清单失败: " + e.getMessage());
+            blog("\u26a0 写入安装清单失败: " + e.getMessage());
         }
+    }
+
+    /** 找出当前包名下已安装的 zip 名集合（兼容旧的单文件清单）。 */
+    private java.util.Set<String> installedNames(File patchDir, String gameStr) {
+        java.util.Set<String> out = new java.util.HashSet<String>();
+        String pkg = pkgOf(gameStr);
+        File f = new File(new File(patchDir, ".已安装"), (pkg == null ? "_unknown" : pkg) + ".tsv");
+        File legacy = new File(patchDir, ".已安装.tsv");
+        for (File src : new File[]{f, legacy}) {
+            if (!src.isFile()) continue;
+            BufferedReader r = null;
+            try {
+                r = new BufferedReader(new InputStreamReader(new FileInputStream(src), "UTF-8"));
+                String line;
+                while ((line = r.readLine()) != null) {
+                    int t = line.indexOf('\t');
+                    if (t > 0) out.add(line.substring(0, t));
+                }
+            } catch (Throwable ignored) {
+            } finally {
+                try {
+                    if (r != null) r.close();
+                } catch (Throwable ignored) {
+                }
+            }
+        }
+        return out;
     }
 
     /** 删除已经装过的补丁 zip（zip 留在补丁目录里，手动清掉）。 */
     private void confirmDeleteInstalled() {
         final String rootStr = text(etRoot, DEF_ROOT);
         final String patchStr = text(etPatch, rootStr + "/补丁存放位置（zip）");
-        final File idx = new File(patchStr, ".已安装.tsv");
-        if (!idx.isFile()) {
+        final String gameStr = text(etGame, DEF_GAME);
+        final File patchDir = new File(patchStr);
+        // v3.8 起记录写在 .已安装/<包名>.tsv，旧的单文件仍兼容
+        java.util.Set<String> installed = installedNames(patchDir, gameStr);
+        if (installed.isEmpty()) {
             toast("还没有安装记录：先装一次补丁");
             return;
         }
         final List<String> names = new ArrayList<String>();
         final List<File> files = new ArrayList<File>();
         long total = 0;
-        BufferedReader r = null;
-        try {
-            r = new BufferedReader(new InputStreamReader(new FileInputStream(idx), "UTF-8"));
-            String line;
-            while ((line = r.readLine()) != null) {
-                int t = line.indexOf('\t');
-                String name = t > 0 ? line.substring(0, t) : line;
-                if (name.length() == 0) continue;
-                File f = new File(patchStr, name);
-                if (f.isFile()) {
-                    names.add(name);
-                    files.add(f);
-                    total += f.length();
-                }
-            }
-        } catch (Throwable ignored) {
-        } finally {
-            try {
-                if (r != null) r.close();
-            } catch (Throwable ignored) {
+        for (String name : installed) {
+            File f = new File(patchDir, name);
+            if (f.isFile()) {
+                names.add(name);
+                files.add(f);
+                total += f.length();
             }
         }
         if (files.isEmpty()) {
@@ -1904,35 +2135,46 @@ public class MainActivity extends Activity {
                         for (File f : files) {
                             if (f.delete()) ok++; else fail++;
                         }
-                        List<String> rest = new ArrayList<String>();
-                        BufferedReader rr = null;
-                        try {
-                            rr = new BufferedReader(new InputStreamReader(new FileInputStream(idx), "UTF-8"));
-                            String line;
-                            while ((line = rr.readLine()) != null) {
-                                int t = line.indexOf('\t');
-                                String name = t > 0 ? line.substring(0, t) : line;
-                                if (!names.contains(name)) rest.add(line);
-                            }
-                        } catch (Throwable ignored) {
-                        } finally {
-                            try {
-                                if (rr != null) rr.close();
-                            } catch (Throwable ignored) {
-                            }
-                        }
-                        StringBuilder sb = new StringBuilder();
-                        for (String l : rest) sb.append(l).append('\n');
-                        try {
-                            writeText(idx, sb.toString());
-                        } catch (IOException ignored) {
-                        }
+                        removeInstalled(patchDir, gameStr, names);
                         if (fail == 0) log("\u2713 已删除 " + ok + " 个补丁 zip（游戏里的补丁和备份都没动）");
                         else log("\u26a0 删除 " + ok + " 个，失败 " + fail + " 个");
                     }
                 })
                 .setNegativeButton("取消", null)
                 .show();
+    }
+
+    /** 删除记录：同时清理 .已安装/<包名>.tsv 与旧的 .已安装.tsv。 */
+    private void removeInstalled(File patchDir, String gameStr, java.util.Collection<String> names) {
+        String pkg = pkgOf(gameStr);
+        File cur = new File(new File(patchDir, ".已安装"), (pkg == null ? "_unknown" : pkg) + ".tsv");
+        File legacy = new File(patchDir, ".已安装.tsv");
+        for (File src : new File[]{cur, legacy}) {
+            if (!src.isFile()) continue;
+            List<String> rest = new ArrayList<String>();
+            BufferedReader r = null;
+            try {
+                r = new BufferedReader(new InputStreamReader(new FileInputStream(src), "UTF-8"));
+                String line;
+                while ((line = r.readLine()) != null) {
+                    int t = line.indexOf('\t');
+                    String name = t > 0 ? line.substring(0, t) : line;
+                    if (!names.contains(name)) rest.add(line);
+                }
+            } catch (Throwable ignored) {
+            } finally {
+                try {
+                    if (r != null) r.close();
+                } catch (Throwable ignored) {
+                }
+            }
+            StringBuilder sb = new StringBuilder();
+            for (String l : rest) sb.append(l).append('\n');
+            try {
+                writeText(src, sb.toString());
+            } catch (IOException ignored) {
+            }
+        }
     }
 
     /** 从本次的日志文件里抓一个数字出来（抓不到返回 -1）。 */

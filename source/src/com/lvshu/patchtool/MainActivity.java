@@ -41,9 +41,12 @@ import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.HashMap;
-import java.util.Map;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -132,7 +135,7 @@ public class MainActivity extends Activity {
             Shizuku.addRequestPermissionResultListener(permListener);
         } catch (Throwable ignored) {
         }
-        log("酸败补丁助手 v3.12 已启动。");
+        log("酸败补丁助手 v3.13 已启动。");
         log("两条通道任选其一：① 授权 Shizuku，或在配置里勾「优先用 root」→ ② 所有文件访问 → ③ 一键安装。");
         refreshStatus();
         refreshBackupHint();
@@ -1007,8 +1010,10 @@ public class MainActivity extends Activity {
         File idx = new File(tmpRoot, ".gidx");
         idx.delete();
         File sh = new File(tmpRoot, "idx_" + System.currentTimeMillis() + ".sh");
-        String body = "#!/system/bin/sh\nfind " + Patcher.shQuote(gameStr + "/data/android/assetbundle")
-                + " -type f 2>/dev/null > " + Patcher.shQuote(idx.getAbsolutePath()) + "\n";
+        // v3.13：游戏资源在 files 下的 data 与 flies 两个目录，一起列
+        String body = "#!/system/bin/sh\nfor d in " + Patcher.shQuote(gameStr + "/data") + " "
+                + Patcher.shQuote(gameStr + "/flies") + "; do [ -d \"$d\" ] && find \"$d\" -type f 2>/dev/null; done > "
+                + Patcher.shQuote(idx.getAbsolutePath()) + "\n";
         try {
             writeText(sh, body);
             sh.setReadable(true, false);
@@ -1050,13 +1055,27 @@ public class MainActivity extends Activity {
         // CAB 索引：有缓存就直接用；没有才建（首次会提示等 1~2 分钟）
         Map<String, List<String>> cabMap = loadCabIndex(gameStr, tmpRoot, rootStr);
 
+        // 新建路径的首级校验：只允许写进游戏 files 下真实存在的一级目录
+        Set<String> roots = gameTopDirs(gameStr, tmpRoot);
+        blog("[定位] 游戏一级目录：" + (roots.isEmpty() ? "(没列到，新建路径不做首级校验)" : roots.toString()));
+
         List<String> report = new ArrayList<String>();
         int[] r = Patcher.relocate(stage, stage2, rels, cabMap, skipped, new Patcher.Progress() {
             @Override
             public void onProgress(String message) {
                 postLog(message);
             }
-        }, report);
+        }, report, roots, new Patcher.Confirm() {
+            @Override
+            public boolean confirmNew(List<String> paths) {
+                // 汇总弹窗：一次列全，点是全部新建，点否只跳过这些新增
+                log("游戏里没有 " + paths.size() + " 个文件的对应资源，等待确认是否按精确路径新建…");
+                boolean yes = confirmNewFiles(paths);
+                log(yes ? "✓ 已确认：按精确路径新建 " + paths.size() + " 个文件"
+                        : "✗ 已取消：只跳过这 " + paths.size() + " 个新增文件，已有资源照常安装");
+                return yes;
+            }
+        });
         // P1：定位明细（含每个文件为什么跳过）必须落盘，否则弹窗说“看日志”却查不到
         blog("[定位] ===== 开始定位 =====");
         for (String line : report) blog("[定位] " + line);
@@ -1073,6 +1092,101 @@ public class MainActivity extends Activity {
     }
 
     /**
+     * 游戏 files 下的一级目录名单（校验「精确路径新建」不会在游戏目录里乱建顶层目录）。
+     * 应用进程看不到 Android/data，只能让 shell 列；拿不到就返回空集合，
+     * 此时不做首级校验，路径合法性仍由 Patcher.canCreateNew 兜住。
+     */
+    private Set<String> gameTopDirs(String gameStr, File tmpRoot) {
+        Set<String> out = new HashSet<String>();
+        File lst = new File(tmpRoot, ".groot");
+        lst.delete();
+        File sh = new File(tmpRoot, "groot_" + System.currentTimeMillis() + ".sh");
+        String body = "#!/system/bin/sh\nls -1 " + Patcher.shQuote(gameStr)
+                + " 2>/dev/null > " + Patcher.shQuote(lst.getAbsolutePath()) + "\n";
+        try {
+            writeText(sh, body);
+            sh.setReadable(true, false);
+            Shell.runScript(sh.getAbsolutePath());
+        } catch (Throwable e) {
+            log("! 列游戏一级目录失败：" + e);
+        }
+        sh.delete();
+        try {
+            for (String line : readText(lst).split("\n")) {
+                line = line.trim();
+                if (line.length() > 0) out.add(line);
+            }
+        } catch (Throwable ignored) {
+        }
+        lst.delete();
+        return out;
+    }
+
+    /**
+     * 汇总弹窗：一次列出全部「游戏里没有对应资源、但补丁包给了精确路径」的文件。
+     *
+     * 点「全部新建」→ 全部按精确路径写进去；
+     * 点「只跳过新增」→ 这些文件不装，已经存在的资源照常安装。
+     *
+     * 安装在后台线程跑，这里必须等用户点完；页面被系统销毁时按「跳过新增」处理，不能卡死。
+     */
+    private boolean confirmNewFiles(final List<String> paths) {
+        if (paths == null || paths.isEmpty()) return false;
+        if (isFinishing()) return false;
+        final boolean[] yes = new boolean[]{false};
+        final CountDownLatch latch = new CountDownLatch(1);
+        runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                StringBuilder sb = new StringBuilder();
+                sb.append("游戏里没有下面这些文件的对应资源，可以按补丁包里的精确路径新建：\n");
+                int lim = Math.min(paths.size(), 12);
+                for (int k = 0; k < lim; k++) sb.append("\n  • ").append(paths.get(k));
+                if (paths.size() > lim) sb.append("\n  ……还有 ").append(paths.size() - lim).append(" 个");
+                sb.append("\n\n「全部新建」按上面的路径写入；「只跳过新增」这些文件不装，")
+                        .append("其它已有资源照常安装。");
+                try {
+                    new AlertDialog.Builder(MainActivity.this)
+                            .setTitle("发现 " + paths.size() + " 个新文件")
+                            .setMessage(sb.toString())
+                            .setCancelable(false)
+                            .setPositiveButton("全部新建", new DialogInterface.OnClickListener() {
+                                @Override
+                                public void onClick(DialogInterface d, int which) {
+                                    yes[0] = true;
+                                    latch.countDown();
+                                }
+                            })
+                            .setNegativeButton("只跳过新增", new DialogInterface.OnClickListener() {
+                                @Override
+                                public void onClick(DialogInterface d, int which) {
+                                    yes[0] = false;
+                                    latch.countDown();
+                                }
+                            })
+                            .setOnDismissListener(new DialogInterface.OnDismissListener() {
+                                @Override
+                                public void onDismiss(DialogInterface d) {
+                                    latch.countDown();
+                                }
+                            })
+                            .show();
+                } catch (Throwable t) {
+                    // 弹不出来就别拦着装：按「跳过新增」走，其它文件照常安装
+                    log("! 汇总弹窗打不开，本次按「只跳过新增」处理：" + t);
+                    latch.countDown();
+                }
+            }
+        });
+        try {
+            latch.await();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+        return yes[0];
+    }
+
+    /**
      * 加载游戏 CAB 索引（缓存优先）。
      *
      * v3.8：按包名分目录存放，因为同一个游戏不同渠道服包名不同
@@ -1081,7 +1195,7 @@ public class MainActivity extends Activity {
      * 也分不清换服时该复用还是重建。
      *
      * 目录：<rootStr>/缓存/资源索引/<包名>/{index.tsv, meta.txt}
-     * 失效条件：assetbundle 目录 mtime 变了。
+     * 失效条件：files 下 data 或 flies 目录 mtime 变了（两者相加比对）。
      */
     private Map<String, List<String>> loadCabIndex(String gameStr, File tmpRoot, String rootStr) {
         File dir = indexDir(rootStr, gameStr);
@@ -1095,7 +1209,8 @@ public class MainActivity extends Activity {
 
         blog("[索引] 包名 " + (pkg == null ? "(未知)" : pkg) + "  目录 " + dir.getAbsolutePath());
 
-        long gameMtime = dirMtime(gameStr + "/data/android/assetbundle", tmpRoot);
+        // v3.13：data 与 flies 两个目录的 mtime 相加，任一变动都会让缓存失效重建
+        long gameMtime = dirMtime(gameStr + "/data", tmpRoot) + dirMtime(gameStr + "/flies", tmpRoot);
         if (tsv.isFile() && meta.isFile()) {
             String m;
             try {
@@ -1111,7 +1226,7 @@ public class MainActivity extends Activity {
                 }
                 blog("[索引] 缓存存在但内容为空，重建");
             } else {
-                blog("[索引] 缓存失效（abroot mtime=" + gameMtime + " 与记录不符），重建");
+                blog("[索引] 缓存失效（data+flies mtime=" + gameMtime + " 与记录不符），重建");
             }
         } else {
             blog("[索引] 该渠道服还没有索引，开始建表");

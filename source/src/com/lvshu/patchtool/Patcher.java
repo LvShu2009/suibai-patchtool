@@ -200,17 +200,20 @@ final class Patcher {
      * @param selfCheck 是否额外用旧算法抽 50 条，写到 <outFile>.chk 供 App 比对
      */
     static String buildCabIndexScript(String gameStr, File outFile, boolean selfCheck) {
-        String abroot = gameStr + "/data/android/assetbundle";
+        // v3.13：游戏资源就在 files 下的 data 与 flies 两个目录，建表时一起扫。
+        String rootData = gameStr + "/data";
+        String rootFlies = gameStr + "/flies";
         String out = esc(outFile.getAbsolutePath());
         String chk = esc(outFile.getAbsolutePath() + ".chk");
 
         StringBuilder sb = new StringBuilder();
         sb.append("#!/system/bin/sh\n");
         sb.append("# 酸败补丁助手 —— 建 CAB 索引（快速版）\n");
-        sb.append("G='").append(esc(abroot)).append("'\n");
+        sb.append("G1='").append(esc(rootData)).append("'\n");
+        sb.append("G2='").append(esc(rootFlies)).append("'\n");
         sb.append("O='").append(out).append("'\n");
         sb.append("CHK='").append(chk).append("'\n");
-        sb.append("if [ ! -d \"$G\" ]; then echo \"[$(date '+%H:%M:%S')] [索引] ✗ 目录不存在: $G\"; exit 3; fi\n");
+        sb.append("if [ ! -d \"$G1\" ] && [ ! -d \"$G2\" ]; then echo \"[$(date '+%H:%M:%S')] [索引] ✗ 目录都不存在: $G1 / $G2\"; exit 3; fi\n");
         // 【双通道兼容】root 与 Shizuku(uid=2000) 都要能跑。
         //   • 索引目录若由对方身份创建，本身份可能写不进去 → 先测目录可写，再强制删旧文件。
         //   • 旧版只用 ": > $O"，在文件属主是 root 时 Shizuku 清空会静默失败，
@@ -224,10 +227,10 @@ final class Patcher {
         sb.append(": > \"$CHK\" 2>/dev/null\n");
         sb.append("L=\"$O.list\"\n");
         sb.append("rm -f \"$L\" 2>/dev/null\n");
-        sb.append("echo \"[$(date '+%H:%M:%S')] [索引] 身份 uid=$(id -u)  扫描根 $G\"\n");
-        // 必须 find -print0 与 xargs -0 配对。若 find 用换行而 xargs 用 -0，
-        // 整份清单会被当成一个超长文件名，瞬间“扫完”且产出 0 行。
-        sb.append("find \"$G\" -type f -name '*.assetbundle' -print0 2>/dev/null > \"$L\"\n");
+        sb.append("echo \"[$(date '+%H:%M:%S')] [索引] 身份 uid=$(id -u)  扫描根 $G1 $G2\"\n");
+        // 必须 find -print0 与后续 tr '\000' '\n' 配对；两个目录各自扫，追加到同一份清单。
+        // 若 find 用换行而后续按 \0 切，整份清单会被当成一个超长文件名，瞬间“扫完”且产出 0 行。
+        sb.append("for g in \"$G1\" \"$G2\"; do [ -d \"$g\" ] && find \"$g\" -type f -name '*.assetbundle' -print0 2>/dev/null; done > \"$L\"\n");
         sb.append("TOTAL=$(tr -cd '\\000' < \"$L\" | wc -c | tr -d ' ')\n");
         sb.append("echo \"[$(date '+%H:%M:%S')] [索引] 待扫描 $TOTAL 个 .assetbundle\"\n");
         sb.append("if [ \"$TOTAL\" = \"0\" ]; then echo \"[$(date '+%H:%M:%S')] [索引] ✗ 一个文件都没找到\"; rm -f \"$L\"; exit 4; fi\n");
@@ -406,10 +409,86 @@ final class Patcher {
     /** 定位结果的一个条目：一个源文件可以对应多个目标（游戏里复用同一资源）。 */
     static final class Target {
         final String srcRel;
+        /** true = 游戏里没有这个资源，按精确路径新建（只有精确路径允许新建）。 */
+        boolean isNew;
         final java.util.List<String> dstRels = new java.util.ArrayList<String>();
         Target(String srcRel) {
             this.srcRel = srcRel;
         }
+    }
+
+    /** 待新建文件的汇总确认：返回 true 才写盘。 */
+    interface Confirm {
+        boolean confirmNew(java.util.List<String> paths);
+    }
+
+    /**
+     * 精确路径新建的准入校验（v3.13）。
+     *
+     * 规则（按用户要求）：
+     *   • 只认游戏 files 下的相对路径：绝对路径、含 . / .. 的路径一律拒绝；
+     *   • 不允许写进 assets/（那是游戏 APK 内置资源，热更目录里放没用）；
+     *   • 首级目录必须是游戏 files 下真实存在的目录，避免把「作者包装目录」
+     *     （如 李白/role/x.assetbundle）当新路径，在游戏目录里建一堆垃圾目录。
+     *
+     * @param gameRoots 游戏 files 下一级目录名集合；null / 空表示不做首级校验
+     */
+    static boolean canCreateNew(String rel, java.util.Set<String> gameRoots) {
+        if (rel == null || rel.length() == 0) return false;
+        if (rel.charAt(0) == '/') return false;
+        if (rel.indexOf('\\') >= 0) return false;
+        String[] seg = rel.split("/");
+        if (seg.length < 2) return false;               // 光一个文件名、没有目录结构，不当资源
+        for (int k = 0; k < seg.length; k++) {
+            String s = seg[k];
+            if (s.length() == 0 || s.equals(".") || s.equals("..")) return false;
+        }
+        if (seg[0].equalsIgnoreCase("assets")) return false;
+        if (gameRoots != null && !gameRoots.isEmpty() && !gameRoots.contains(seg[0])) return false;
+        return true;
+    }
+
+    /**
+     * 把补丁包里的路径归一成「游戏 files 下的真实相对路径」（v3.13）。
+     *
+     * 关键：不能无脑把 flies 剥光——游戏里 files/flies 是真实目录，
+     * 包里多写一层时只剥「多余的那一层」，保留最内层真实目录：
+     *   flies/flies/data/...  → 剥掉重复的第一层 → flies/data/...（落到第二层 flies）
+     *   李白/data/...          → 剥掉作者的包装目录   → data/...
+     *   data/... / flies/...   → 本来就是真实一级目录，原样保留
+     *
+     * 这条路不依赖游戏清单与 CAB 索引，所以新增文件也能算出最终落点。
+     *
+     * @return 归一后的路径；本身不合法（绝对路径、含 . 或 ..、空段、assets/）时返回 null
+     */
+    static String normalizedRel(String rel, java.util.Set<String> gameRoots) {
+        if (rel == null) return null;
+        rel = rel.replace('\\', '/');
+        if (rel.length() == 0 || rel.charAt(0) == '/') return null;
+        String[] seg = rel.split("/");
+        if (seg.length < 2) return null;
+        for (int k = 0; k < seg.length; k++) {
+            String s = seg[k];
+            if (s.length() == 0 || s.equals(".") || s.equals("..")) return null;
+        }
+        if (seg[0].equalsIgnoreCase("assets")) return null;
+        int st = 0;
+        while (st < seg.length - 1) {
+            String cur = seg[st];
+            String nxt = seg[st + 1];
+            boolean dup = cur.equals(nxt);                        // flies/flies
+            boolean wrapper = gameRoots != null && !gameRoots.isEmpty()
+                    && !gameRoots.contains(cur) && gameRoots.contains(nxt);
+            if (!dup && !wrapper) break;
+            st++;
+        }
+        if (gameRoots != null && !gameRoots.isEmpty() && !gameRoots.contains(seg[st])) return null;
+        StringBuilder sb = new StringBuilder(rel.length());
+        for (int k = st; k < seg.length; k++) {
+            if (sb.length() > 0) sb.append('/');
+            sb.append(seg[k]);
+        }
+        return sb.toString();
     }
 
     /**
@@ -471,27 +550,37 @@ final class Patcher {
     }
 
     /**
-     * 定位（旧版兼容入口）。    /**
-     * 定位：① 精确路径（含逐级剥皮） → ② 扫盘同名唯一。都不中就不装，绝不猜。
+     * 定位并重排到 stage2。
      *
-     * 已删除：
-     *   • 模糊/归一化匹配：会把不同资源当同一个。实例：105skin6（面板贴图）被当成
-     *     105_skin6（英雄预制体），直接覆盖错了文件。名字不同就是不同文件。
-     *   • CAB 内部名定位：实测可行，但与本工具无关，按需求停用。
+     * 两段式（v3.13）：
+     *   ① 先只定位、不写盘，把「游戏里没有对应资源的精确路径」汇总出来；
+     *   ② 交给调用方弹一次汇总窗确认：点是全部新建，点否只跳过这些新增，
+     *      已有资源照常覆盖安装。
      *
+     * 只有精确路径能新建；同名 / 剥皮 / CAB 这些模式仍然只覆盖、不新建。
+     *
+     * 定位顺序：① 精确路径（含逐级剥皮） → ② 同名唯一 → ③ 同名多个 + CAB 双条件。
+     * 已删除的模糊匹配：105skin6（面板贴图）会被当成 105_skin6（英雄预制体），覆盖错文件。
+     *
+     * @param gameRoots 游戏 files 下一级目录名，用于校验新建路径（可为 null）
+     * @param confirm   汇总确认回调（可为 null，表示一律不新建）
      * @return {命中数, 未定位数}
      */
     static int[] relocate(File stage, File stage2, java.util.List<String> gameRels,
                           java.util.Map<String, java.util.List<String>> cabMap,
                           java.util.List<String> skipped,
-                          Progress progress, java.util.List<String> report) {
+                          Progress progress, java.util.List<String> report,
+                          java.util.Set<String> gameRoots, Confirm confirm) {
         java.util.Set<String> all = new java.util.HashSet<String>(gameRels);
         java.util.Map<String, java.util.List<String>>[] idx = buildIndex(gameRels);
         java.util.List<String> rels = new java.util.ArrayList<String>();
         walk(stage, "", rels);
-        int ok = 0;
         int miss = 0;
         int i = 0;
+        java.util.List<Target> plan = new java.util.ArrayList<Target>();
+        java.util.List<Target> fresh = new java.util.ArrayList<Target>();
+
+        // —— 第一遍：只定位，不写盘 ——
         for (String rel : rels) {
             i++;
             String name = rel.substring(rel.lastIndexOf('/') + 1);
@@ -511,6 +600,23 @@ final class Patcher {
             }
 
             Target t = locateTarget(rel, gameRels, all, idx[0], cabMap, srcCab);
+
+            // 精确路径在游戏里找不到 → 按归一化路径新建（不依赖清单与 CAB），
+            // 等汇总弹窗确认后再写盘。重复前缀只剥多余那层，真实 flies 会保留。
+            if (t == null) {
+                String newRel = normalizedRel(rel, gameRoots);
+                if (newRel != null && canCreateNew(newRel, gameRoots)) {
+                    Target nt = new Target(rel);
+                    nt.isNew = true;
+                    nt.dstRels.add(newRel);
+                    fresh.add(nt);
+                    if (progress != null && (i % 30) == 0) {
+                        progress.onProgress("定位中… " + i + "/" + rels.size());
+                    }
+                    continue;
+                }
+            }
+
             if (t == null) {
                 miss++;
                 if (report != null) {
@@ -536,44 +642,94 @@ final class Patcher {
                 continue;
             }
 
-            // 落到 stage2；一个源文件可以对应多个目标（游戏复用同一资源）
-            //
-            // v3.10 修：旧版第一个目标用 renameTo 把源文件搬走，第二个目标再读源文件
-            // 就 ENOENT（实测 墨姐改歌姬修复/263.assetbundle 只替换了 1 处）。
-            // 现在所有目标一律 copy，源文件在全部目标写完后统一删。
-            File src = new File(stage, rel);
-            boolean anyOk = false;
-            for (String dstRel : t.dstRels) {
-                File dst = new File(stage2, dstRel);
-                File parent = dst.getParentFile();
-                if (parent != null && !parent.exists()) parent.mkdirs();
-                try {
-                    copy(new FileInputStream(src), dst);
-                    anyOk = true;
-                } catch (IOException e) {
-                    if (report != null) report.add("搬移失败：" + dstRel + " / " + e.getMessage());
-                }
-            }
-            if (anyOk) {
-                src.delete();
-            } else {
-                if (report != null) report.add("✗ 全部目标写入失败：" + rel);
-                miss++;
-                continue;
-            }
-            ok++;
-            if (report != null) {
-                String extra = t.dstRels.size() > 1 ? ("（共 " + t.dstRels.size() + " 处复用，全部替换）") : "";
-                report.add("✓ " + rel + " → " + t.dstRels.get(0) + extra);
-                for (int k = 1; k < t.dstRels.size(); k++) {
-                    report.add("    另：" + t.dstRels.get(k));
-                }
-            }
+            plan.add(t);
             if (progress != null && (i % 30) == 0) {
                 progress.onProgress("定位中… " + i + "/" + rels.size());
             }
         }
+
+        // —— 汇总确认：一次列全，点否只跳过这些新增 ——
+        boolean allowNew = false;
+        if (!fresh.isEmpty()) {
+            java.util.List<String> paths = new java.util.ArrayList<String>();
+            for (Target t : fresh) paths.add(t.dstRels.get(0));
+            if (report != null) {
+                report.add("＋ 有 " + paths.size() + " 个文件在游戏里没有对应资源（精确路径）：");
+                int lim = Math.min(paths.size(), 20);
+                for (int k = 0; k < lim; k++) report.add("    " + paths.get(k));
+                if (paths.size() > lim) report.add("    ……还有 " + (paths.size() - lim) + " 个");
+            }
+            allowNew = confirm != null && confirm.confirmNew(paths);
+            if (report != null) {
+                report.add(allowNew
+                        ? "＋ 已确认：按精确路径新建 " + paths.size() + " 个文件"
+                        : "✗ 已取消：跳过 " + paths.size() + " 个新建文件，已有资源照常安装");
+            }
+            if (!allowNew) {
+                miss += fresh.size();
+                if (skipped != null) {
+                    for (Target t : fresh) {
+                        skipped.add(t.srcRel.substring(t.srcRel.lastIndexOf('/') + 1) + "（未新建）");
+                    }
+                }
+                fresh.clear();
+            }
+        }
+
+        // —— 第二遍：写盘 ——
+        int ok = 0;
+        for (Target t : plan) {
+            if (deployTarget(stage, stage2, t, report)) ok++;
+            else miss++;
+        }
+        for (Target t : fresh) {
+            if (deployTarget(stage, stage2, t, report)) ok++;
+            else miss++;
+        }
         return new int[]{ok, miss};
+    }
+
+    /**
+     * 把一个定位结果写进 stage2。
+     *
+     * v3.10 修：旧版第一个目标用 renameTo 把源文件搬走，第二个目标再读源文件就 ENOENT
+     * （实测 墨姐改歌姬修复/263.assetbundle 只替换了 1 处）。现在一律 copy，全部写完后统一删源。
+     */
+    private static boolean deployTarget(File stage, File stage2, Target t, java.util.List<String> report) {
+        File src = new File(stage, t.srcRel);
+        boolean anyOk = false;
+        for (String dstRel : t.dstRels) {
+            File dst = new File(stage2, dstRel);
+            File parent = dst.getParentFile();
+            if (parent != null && !parent.exists()) parent.mkdirs();
+            try {
+                copy(new FileInputStream(src), dst);
+                anyOk = true;
+            } catch (IOException e) {
+                if (report != null) report.add("搬移失败：" + dstRel + " / " + e.getMessage());
+            }
+        }
+        if (!anyOk) {
+            if (report != null) report.add("✗ 全部目标写入失败：" + t.srcRel);
+            return false;
+        }
+        src.delete();
+        if (report != null) {
+            if (t.isNew) {
+                report.add("＋ 该路径没有对应资源，按精确路径新建：" + t.srcRel);
+                if (!t.srcRel.equals(t.dstRels.get(0))) {
+                    report.add("    包内多层前缀已归一，真实目录保留：" + t.dstRels.get(0));
+                }
+                report.add("    已将 " + t.srcRel + " 移动到 " + t.dstRels.get(0));
+            } else {
+                String extra = t.dstRels.size() > 1 ? ("（共 " + t.dstRels.size() + " 处复用，全部替换）") : "";
+                report.add("✓ " + t.srcRel + " → " + t.dstRels.get(0) + extra);
+                for (int k = 1; k < t.dstRels.size(); k++) {
+                    report.add("    另：" + t.dstRels.get(k));
+                }
+            }
+        }
+        return true;
     }
 
     private static void walk(File dir, String base, java.util.List<String> acc) {

@@ -1823,6 +1823,40 @@ public class MainActivity extends Activity {
             toast("先填游戏内相对路径，或从上面的预设里选一个");
             return;
         }
+        askPackName(rootStr, rel);
+    }
+
+    /**
+     * 打包前问名字：输入什么就用什么，默认填「补丁_<时间>」。
+     * 以前这里直接拿时间戳命名，用户改不了名。
+     */
+    private void askPackName(final String rootStr, final String rel) {
+        final String def = "补丁_" + new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.ROOT).format(new Date());
+        final EditText et = new EditText(this);
+        et.setSingleLine(true);
+        et.setText(def);
+        et.setSelection(def.length());
+        new AlertDialog.Builder(this)
+                .setTitle("打包成什么名字")
+                .setMessage("存到：" + rootStr + "\n文件名会自动补 .zip，重名自动加 _2")
+                .setView(et)
+                .setPositiveButton("开始打包", new DialogInterface.OnClickListener() {
+                    @Override
+                    public void onClick(DialogInterface d, int which) {
+                        String name = Patcher.sanitizeZipName(et.getText().toString());
+                        if (name.length() == 0) {
+                            toast("名字不合法，改用 " + def + ".zip");
+                            name = def + ".zip";
+                        }
+                        startPack(rootStr, rel, name);
+                    }
+                })
+                .setNegativeButton("取消", null)
+                .show();
+    }
+
+    /** 按确认的名字打包；重名不覆盖，自动加序号。 */
+    private void startPack(final String rootStr, final String rel, final String zipName) {
         startWorker(new Runnable() {
             @Override
             public void run() {
@@ -1837,13 +1871,12 @@ public class MainActivity extends Activity {
                     log("✗ 「待打包资源」是空的。");
                     return;
                 }
-                String stamp = new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.ROOT).format(new Date());
-                File out = new File(root, "补丁_" + stamp + ".zip");
+                File out = Patcher.uniqueZipFile(root, zipName);
                 log("正在打包 → " + out.getAbsolutePath());
                 try {
                     int n = Patcher.pack(src, rel, out);
                     log("✓ 打包成功：" + n + " 个文件");
-                    log("  压缩包：" + out.getAbsolutePath());
+                    log("  压缩包：" + out.getName() + "（" + out.getAbsolutePath() + "）");
                     log("  内部路径：files/" + Patcher.sanitizeRel(rel) + "/");
                 } catch (IOException e) {
                     log("✗ 打包失败: " + e.getMessage());

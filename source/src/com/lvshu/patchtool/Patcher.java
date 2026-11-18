@@ -1131,6 +1131,52 @@ final class Patcher {
         return p;
     }
 
+    /**
+     * 打包文件名消毒（v3.13.1）：按用户输入的名字来，返回 null 之外的合法名字。
+     *
+     * 规则：去首尾空白；末尾 .zip 不重复追加；路径分隔符与 Android/Windows 非法字符
+     * （/ \ : * ? " < > | 与控制符）换成下划线；去掉结尾的点；超长截断到 80 字。
+     *
+     * @return 形如 `名字.zip`；输入无法救回（空名）时返回 ""
+     */
+    static String sanitizeZipName(String raw) {
+        if (raw == null) return "";
+        String s = raw.trim();
+        if (s.length() == 0) return "";
+        if (s.toLowerCase(Locale.ROOT).endsWith(".zip")) {
+            s = s.substring(0, s.length() - 4).trim();
+        }
+        StringBuilder sb = new StringBuilder(s.length());
+        for (int k = 0; k < s.length(); k++) {
+            char c = s.charAt(k);
+            boolean bad = c < 0x20 || c == '/' || c == '\\' || c == ':' || c == '*'
+                    || c == '?' || c == '"' || c == '<' || c == '>' || c == '|';
+            sb.append(bad ? '_' : c);
+        }
+        s = sb.toString().trim();
+        while (s.length() > 0 && s.charAt(s.length() - 1) == '.') {
+            s = s.substring(0, s.length() - 1).trim();
+        }
+        if (s.length() == 0) return "";
+        if (s.length() > 80) s = s.substring(0, 80).trim();
+        if (s.length() == 0) return "";
+        return s + ".zip";
+    }
+
+    /** 同名包已存在就加 _2、_3…，不覆盖上一次打的包。 */
+    static File uniqueZipFile(File dir, String zipName) {
+        String name = sanitizeZipName(zipName);
+        if (name.length() == 0) name = "补丁.zip";
+        File f = new File(dir, name);
+        if (!f.exists()) return f;
+        String base = name.substring(0, name.length() - 4);
+        for (int k = 2; k < 1000; k++) {
+            f = new File(dir, base + "_" + k + ".zip");
+            if (!f.exists()) return f;
+        }
+        return new File(dir, base + "_" + System.currentTimeMillis() + ".zip");
+    }
+
     private static void copy(InputStream in, File out) throws IOException {
         OutputStream os = new FileOutputStream(out);
         try {

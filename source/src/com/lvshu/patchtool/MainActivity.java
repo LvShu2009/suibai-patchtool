@@ -135,7 +135,7 @@ public class MainActivity extends Activity {
             Shizuku.addRequestPermissionResultListener(permListener);
         } catch (Throwable ignored) {
         }
-        log("酸败补丁助手 v3.13 已启动。");
+        log("酸败补丁助手 v3.14 已启动。");
         log("两条通道任选其一：① 授权 Shizuku，或在配置里勾「优先用 root」→ ② 所有文件访问 → ③ 一键安装。");
         refreshStatus();
         refreshBackupHint();
@@ -1002,6 +1002,21 @@ public class MainActivity extends Activity {
 
 
     /**
+     * files 根目录里的音频/图片是玩家自己放的（语音包、截图），不进资源清单，
+     * 免得补丁里的同名文件把它们当成游戏资源覆盖掉。data/ 与 flies/ 下的不算。
+     */
+    private static boolean isRootMedia(String rel) {
+        if (rel.indexOf('/') >= 0) return false;
+        String n = rel.toLowerCase(Locale.ROOT);
+        String[] ext = {".mp3", ".mp4", ".m4a", ".ogg", ".wav", ".flac", ".aac",
+                ".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".mkv", ".avi", ".mpg"};
+        for (int k = 0; k < ext.length; k++) {
+            if (n.endsWith(ext[k])) return true;
+        }
+        return false;
+    }
+
+    /**
      * 用 shell 列出游戏资源目录里的文件（相对游戏 files 的路径）。
      * 应用进程看不到 Android/data，只能让 shell 帮我们列。
      */
@@ -1010,10 +1025,9 @@ public class MainActivity extends Activity {
         File idx = new File(tmpRoot, ".gidx");
         idx.delete();
         File sh = new File(tmpRoot, "idx_" + System.currentTimeMillis() + ".sh");
-        // v3.13：游戏资源在 files 下的 data 与 flies 两个目录，一起列
-        String body = "#!/system/bin/sh\nfor d in " + Patcher.shQuote(gameStr + "/data") + " "
-                + Patcher.shQuote(gameStr + "/flies") + "; do [ -d \"$d\" ] && find \"$d\" -type f 2>/dev/null; done > "
-                + Patcher.shQuote(idx.getAbsolutePath()) + "\n";
+        // v3.14：data 与 flies 两个目录 + files 根目录一层的文件。
+        // localmode.txt、server_assetslist.json 这类就放在根目录，漏扫会被误判成“游戏里没有”。
+        String body = Patcher.buildGameRelScript(gameStr, idx);
         try {
             writeText(sh, body);
             sh.setReadable(true, false);
@@ -1029,6 +1043,7 @@ public class MainActivity extends Activity {
                 line = line.trim();
                 if (line.length() == 0) continue;
                 if (line.startsWith(prefix)) line = line.substring(prefix.length());
+                if (isRootMedia(line)) continue;
                 out.add(line);
             }
         } catch (Throwable ignored) {
@@ -1101,8 +1116,9 @@ public class MainActivity extends Activity {
         File lst = new File(tmpRoot, ".groot");
         lst.delete();
         File sh = new File(tmpRoot, "groot_" + System.currentTimeMillis() + ".sh");
-        String body = "#!/system/bin/sh\nls -1 " + Patcher.shQuote(gameStr)
-                + " 2>/dev/null > " + Patcher.shQuote(lst.getAbsolutePath()) + "\n";
+        // v3.14：只取真正的目录。ls -1 会把 localmode.txt、tombstone_00 这类文件也列出来，
+        // 混进“一级目录”既误导日志，也让新建路径的首级校验偏松。
+        String body = Patcher.buildTopDirsScript(gameStr, lst);
         try {
             writeText(sh, body);
             sh.setReadable(true, false);

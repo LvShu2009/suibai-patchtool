@@ -26,18 +26,18 @@ li{margin:4px 0}
 </head>
 <body>
 <div class="wrap">
-  <h1>酸败补丁助手 <span class="tag">v3.13</span></h1>
+  <h1>酸败补丁助手 <span class="tag">v3.14</span></h1>
   <div class="sub">给手机游戏《300大作战》用的补丁安装工具 · 通过 Shizuku 或 root 写入游戏目录</div>
 
   <div class="card">
     <h2>下载</h2>
-    <a class="btn" href="dist/patchtool-v3.13.apk" download>
-      <b>酸败补丁助手 v3.13 · APK</b>
-      <span>111400 字节 · MD5 d36a0732dbed272e5fd73c039f3e2674</span>
+    <a class="btn" href="dist/patchtool-v3.14.apk" download>
+      <b>酸败补丁助手 v3.14 · APK</b>
+      <span>111400 字节 · MD5 4ffc40849af0d7ecc038f56631bdae9f</span>
     </a>
-    <a class="btn" href="dist/patchtool-kit-v3.13.zip" download>
-      <b>完整工具包 v3.13 · ZIP</b>
-      <span>674473 字节 · 含 APK、源码、SU 脚本、操作指南、图标 · MD5 d237c7009f6889165b7b8cbb0878e695</span>
+    <a class="btn" href="dist/patchtool-kit-v3.14.zip" download>
+      <b>完整工具包 v3.14 · ZIP</b>
+      <span>677814 字节 · 含 APK、源码、SU 脚本、操作指南、图标 · MD5 cf23a5342e25249ee8bca99cec8c6b67</span>
     </a>
     <div class="dim">安装前请先在系统里授予「所有文件访问」；执行身份二选一：Shizuku 授权，或设备 root 直接授权。</div>
   </div>
@@ -65,14 +65,13 @@ li{margin:4px 0}
   </div>
 
   <div class="card">
-    <h2>v3.13 更新</h2>
+    <h2>v3.14 更新</h2>
     <ul>
-      <li>游戏 <code>files</code> 下的 <code>data</code> 与 <code>flies</code> 两个目录一起扫，资源清单与 CAB 索引同口径</li>
-      <li>路径归一化只剥多余的层：<code>flies</code> 是真实目录，双层 <code>flies/flies/...</code> 只剥第一层落到第二层</li>
-      <li>游戏里没有的新增文件不再依赖 CAB：安装前弹汇总窗，点「全部新建」写盘、点「只跳过新增」已有资源照常装</li>
-      <li>日志分别记「该路径没有对应资源，按精确路径新建」与「已将 X 移动到 Y」</li>
-      <li>打包前弹窗问名字：写什么存什么，空名才按时间，同名自动加 <code>_2</code></li>
-      <li>SU 脚本同步迭代：新增路径走归一化、真实 <code>flies</code> 保留，日志文案与 APP 一致</li>
+      <li>资源清单补扫 <code>files</code> 根目录一层文件：<code>localmode.txt</code>、<code>server_assetslist.json</code>、<code>version.json</code> 不再被误判成「游戏里没有」</li>
+      <li>根目录的音频/图片（语音包、截图）不进清单，避免补丁同名文件覆盖它们</li>
+      <li>「游戏一级目录」只列真实目录，不再混进 <code>安装说明.txt</code>、<code>tombstone_00</code></li>
+      <li>说明文件只认真正的游戏文本：<code>localmode.txt</code>、<code>serverlist*.txt</code> 照装，作者的 <code>说明.txt</code> 不再覆盖游戏文档</li>
+      <li>SU 脚本同步这套口径</li>
     </ul>
   </div>
 

@@ -585,8 +585,11 @@ final class Patcher {
             i++;
             String name = rel.substring(rel.lastIndexOf('/') + 1);
 
-            // 说明/预览类文件：不是游戏资源，直接不动
-            if (isSideFile(rel)) {
+            // 说明/预览类文件：不是游戏资源就不动
+            // v3.14：游戏里真有的游戏文本（根目录 localmode.txt / serverlist*.txt、
+            // LocalSetting.txt，或 data/flies 下的 txt）算资源，按精确路径照装；
+            // 作者的 说明.txt / 安装说明.txt 即使同名也不当资源。
+            if (isSideFile(rel) && !isGameTextResource(rel, all)) {
                 miss++;
                 if (report != null) report.add("✗ 跳过（说明/预览文件）：" + name);
                 if (skipped != null) skipped.add(name + "（说明文件）");
@@ -1177,6 +1180,23 @@ final class Patcher {
         return new File(dir, base + "_" + System.currentTimeMillis() + ".zip");
     }
 
+    /**
+     * 说明/预览文件里，少数是真的游戏文本资源：根目录的 localmode.txt、serverlist*.txt、
+     * LocalSetting.txt，以及 data/flies 目录里出现的 txt。
+     *
+     * 只有「游戏里已经存在」且名字对得上这几类的才算资源——
+     * 作者写的 说明.txt / 安装说明.txt 即使在游戏里同名，也不会被当成资源盖上去。
+     */
+    static boolean isGameTextResource(String rel, java.util.Set<String> all) {
+        if (rel == null || all == null || !all.contains(rel)) return false;
+        if (rel.indexOf('/') >= 0) return true;          // 在资源目录里，算游戏文本
+        String n = rel.substring(rel.lastIndexOf('/') + 1).toLowerCase(Locale.ROOT);
+        if (n.equals("localmode.txt")) return true;
+        if (n.startsWith("serverlist") || n.startsWith("server_")) return true;
+        if (n.equals("localsetting.txt")) return true;
+        return false;
+    }
+
     private static void copy(InputStream in, File out) throws IOException {
         OutputStream os = new FileOutputStream(out);
         try {
@@ -1216,5 +1236,30 @@ final class Patcher {
 
     interface Progress {
         void onProgress(String message);
+    }
+
+    /**
+     * 生成「列游戏资源清单」的 shell 脚本（v3.14）。
+     *
+     * data、flies 两个目录全量 + files 根目录一层的文件。
+     * localmode.txt、server_assetslist.json 这类就放在根目录，只扫两个子目录会把它们漏掉，
+     * 定位时就误判成「游戏里没有」。
+     */
+    static String buildGameRelScript(String gameStr, File idxFile) {
+        String q = shQuote(idxFile.getAbsolutePath());
+        return "#!/system/bin/sh\n"
+                + "for d in " + shQuote(gameStr + "/data") + " " + shQuote(gameStr + "/flies")
+                + "; do [ -d \"$d\" ] && find \"$d\" -type f 2>/dev/null; done > " + q + "\n"
+                + "for f in " + shQuote(gameStr) + "/*; do [ -f \"$f\" ] && printf '%s\\n' \"$f\"; done >> " + q + "\n";
+    }
+
+    /**
+     * 生成「列游戏一级目录」的 shell 脚本（v3.14）。
+     * 只输出真正的目录：ls -1 会把 localmode.txt、tombstone_00 这些文件也算进来。
+     */
+    static String buildTopDirsScript(String gameStr, File outFile) {
+        return "#!/system/bin/sh\nfor d in " + shQuote(gameStr)
+                + "/*; do [ -d \"$d\" ] && printf '%s\\n' \"${d##*/}\"; done > "
+                + shQuote(outFile.getAbsolutePath()) + "\n";
     }
 }

@@ -26,7 +26,7 @@ li{margin:4px 0}
 </head>
 <body>
 <div class="wrap">
-  <h1>酸败补丁助手 <span class="tag">v3.14</span></h1>
+  <h1>酸败补丁助手 <span class="tag">v3.14.1</span></h1>
   <div class="sub">给手机游戏《300大作战》用的补丁安装工具 · 通过 Shizuku 或 root 写入游戏目录</div>
 
   <div class="card">
@@ -35,9 +35,9 @@ li{margin:4px 0}
       <b>酸败补丁助手 v3.14 · APK</b>
       <span>111400 字节 · MD5 4ffc40849af0d7ecc038f56631bdae9f</span>
     </a>
-    <a class="btn" href="dist/patchtool-kit-v3.14.zip" download>
-      <b>完整工具包 v3.14 · ZIP</b>
-      <span>677814 字节 · 含 APK、源码、SU 脚本、操作指南、图标 · MD5 cf23a5342e25249ee8bca99cec8c6b67</span>
+    <a class="btn" href="dist/patchtool-kit-v3.14.1.zip" download>
+      <b>完整工具包 v3.14.1 · ZIP</b>
+      <span>679635 字节 · 含 APK、源码、SU 脚本、操作指南、图标 · MD5 53ff156432d319ef39e710e9d2116560</span>
     </a>
     <div class="dim">安装前请先在系统里授予「所有文件访问」；执行身份二选一：Shizuku 授权，或设备 root 直接授权。</div>
   </div>
@@ -61,6 +61,17 @@ li{margin:4px 0}
       <li>「↩ 一键回滚原版」按索引逐字节校验后还原，校验不符的文件会被拒绝，避免盖错</li>
       <li>反和谐为 <code>localmode.txt</code> 空文件开关，「🧹 清理备份」可释放空间并保留原版</li>
       <li>详细日志在 <code>操作日志/</code>，每次运行一个文件</li>
+    </ul>
+  </div>
+
+  <div class="card">
+    <h2>v3.14.1 更新</h2>
+    <ul>
+      <li>SU 安装脚本执行时弹编号菜单选安装：<code>1</code> 固定是官服 <code>com.jumpw.mobile300</code>，其它渠道服按文件数从多到少排 <code>2、3、4…</code></li>
+      <li>直接回车 = 1，输错（非数字 / 没有这个编号）会重问；只有一个安装时不问，直接用</li>
+      <li>带 <code>--pkg</code> / <code>--game</code> 不弹菜单；没有可交互终端时自动选文件最多的那个，并提示可用 <code>--pkg</code> 指定</li>
+      <li>日志新增「候选安装 / 选用安装」两行，出问题能直接看出当时装到了哪个安装</li>
+      <li>APK 未改动，仍是 v3.14（versionCode 33）</li>
     </ul>
   </div>
 

@@ -26,18 +26,18 @@ li{margin:4px 0}
 </head>
 <body>
 <div class="wrap">
-  <h1>酸败补丁助手 <span class="tag">v3.14.1</span></h1>
+  <h1>酸败补丁助手 <span class="tag">v3.14.2</span></h1>
   <div class="sub">给手机游戏《300大作战》用的补丁安装工具 · 通过 Shizuku 或 root 写入游戏目录</div>
 
   <div class="card">
     <h2>下载</h2>
-    <a class="btn" href="dist/patchtool-v3.14.apk" download>
-      <b>酸败补丁助手 v3.14 · APK</b>
-      <span>111400 字节 · MD5 4ffc40849af0d7ecc038f56631bdae9f</span>
+    <a class="btn" href="dist/patchtool-v3.14.2.apk" download>
+      <b>酸败补丁助手 v3.14.2 · APK</b>
+      <span>205608 字节 · versionCode 34 · MD5 e4d3cc7492641389e0b7a066c4b18312</span>
     </a>
-    <a class="btn" href="dist/patchtool-kit-v3.14.1.zip" download>
-      <b>完整工具包 v3.14.1 · ZIP</b>
-      <span>679635 字节 · 含 APK、源码、SU 脚本、操作指南、图标 · MD5 53ff156432d319ef39e710e9d2116560</span>
+    <a class="btn" href="dist/patchtool-kit-v3.14.2.zip" download>
+      <b>完整工具包 v3.14.2 · ZIP</b>
+      <span>685991 字节 · 含 APK、源码、SU 脚本、操作指南、图标 · MD5 7fcf1d7a8b8c09affd40f95ba4a6df5f</span>
     </a>
     <div class="dim">安装前请先在系统里授予「所有文件访问」；执行身份二选一：Shizuku 授权，或设备 root 直接授权。</div>
   </div>
@@ -61,6 +61,18 @@ li{margin:4px 0}
       <li>「↩ 一键回滚原版」按索引逐字节校验后还原，校验不符的文件会被拒绝，避免盖错</li>
       <li>反和谐为 <code>localmode.txt</code> 空文件开关，「🧹 清理备份」可释放空间并保留原版</li>
       <li>详细日志在 <code>操作日志/</code>，每次运行一个文件</li>
+    </ul>
+  </div>
+
+  <div class="card">
+    <h2>v3.14.2 更新</h2>
+    <ul>
+      <li>新增「清单映射」定位级：直接读游戏目录里的 <code>local_assetslist.json</code> / <code>server_assetslist.json</code>，摊平成「文件名 → 路径」反查表</li>
+      <li>三道闸：清单里该名字只有 1 条路径 + 游戏里真实存在 + 与补丁文件 CAB 一致，缺一不采纳</li>
+      <li>清单里同名多路径一律跳过，交给 CAB 消歧，不猜</li>
+      <li>收益只在「同名多处、又还没建 CAB 索引」时：直接给出路径，省掉十几分钟建表</li>
+      <li>改名的文件救不了（清单按名字反查）；清单里也没有 <code>flies</code> 条目，那部分仍靠扫描 + CAB</li>
+      <li>SU 脚本未改动，仍是 v3.14.1：它比对 CAB 是即时读文件，不需要建表</li>
     </ul>
   </div>
 

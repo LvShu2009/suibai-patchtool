@@ -26,18 +26,18 @@ li{margin:4px 0}
 </head>
 <body>
 <div class="wrap">
-  <h1>酸败补丁助手 <span class="tag">v3.14.2</span></h1>
+  <h1>酸败补丁助手 <span class="tag">v3.14.3</span></h1>
   <div class="sub">给手机游戏《300大作战》用的补丁安装工具 · 通过 Shizuku 或 root 写入游戏目录</div>
 
   <div class="card">
     <h2>下载</h2>
-    <a class="btn" href="dist/patchtool-v3.14.2.apk" download>
-      <b>酸败补丁助手 v3.14.2 · APK</b>
-      <span>205608 字节 · versionCode 34 · MD5 e4d3cc7492641389e0b7a066c4b18312</span>
+    <a class="btn" href="dist/patchtool-v3.14.3.apk" download>
+      <b>酸败补丁助手 v3.14.3 · APK</b>
+      <span>205608 字节 · versionCode 35 · MD5 9ccd845fd4a5de59fbf570a0fee8ad38</span>
     </a>
-    <a class="btn" href="dist/patchtool-kit-v3.14.2.zip" download>
-      <b>完整工具包 v3.14.2 · ZIP</b>
-      <span>685991 字节 · 含 APK、源码、SU 脚本、操作指南、图标 · MD5 7fcf1d7a8b8c09affd40f95ba4a6df5f</span>
+    <a class="btn" href="dist/patchtool-kit-v3.14.3.zip" download>
+      <b>完整工具包 v3.14.3 · ZIP</b>
+      <span>686739 字节 · 含 APK、源码、SU 脚本、操作指南、图标 · MD5 153fef894d51f796b8a4a2797df57ef7</span>
     </a>
     <div class="dim">安装前请先在系统里授予「所有文件访问」；执行身份二选一：Shizuku 授权，或设备 root 直接授权。</div>
   </div>
@@ -61,6 +61,18 @@ li{margin:4px 0}
       <li>「↩ 一键回滚原版」按索引逐字节校验后还原，校验不符的文件会被拒绝，避免盖错</li>
       <li>反和谐为 <code>localmode.txt</code> 空文件开关，「🧹 清理备份」可释放空间并保留原版</li>
       <li>详细日志在 <code>操作日志/</code>，每次运行一个文件</li>
+    </ul>
+  </div>
+
+  <div class="card">
+    <h2>v3.14.3 更新</h2>
+    <ul>
+      <li>确认 <code>files</code> 下再建 <code>files</code>、以及 <code>files/flies</code> 都是历史误建：删掉后游戏正常启动，游戏内「修复资源」也不会重建</li>
+      <li>一级目录排除 <code>files</code> / <code>flies</code> / <code>assets</code> / <code>Android</code>，扫描、匹配、新建三处一致</li>
+      <li>CAB 索引与资源清单不再扫 <code>flies</code>；索引缓存失效只看 <code>data</code> 的 mtime</li>
+      <li>检测到误建目录时日志明说：<code>忽略历史误建目录：[files, flies]</code></li>
+      <li>SU 脚本同步：<code>find</code> 排除两个子树，<code>files</code>/<code>flies</code> 不再当合法首级目录</li>
+      <li>已装进误建目录的历史文件不会被自动删除，但不再参与索引、也不会再写进去</li>
     </ul>
   </div>
 

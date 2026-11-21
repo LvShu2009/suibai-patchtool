@@ -26,18 +26,18 @@ li{margin:4px 0}
 </head>
 <body>
 <div class="wrap">
-  <h1>酸败补丁助手 <span class="tag">v3.14.3</span></h1>
+  <h1>酸败补丁助手 <span class="tag">v3.15</span></h1>
   <div class="sub">给手机游戏《300大作战》用的补丁安装工具 · 通过 Shizuku 或 root 写入游戏目录</div>
 
   <div class="card">
     <h2>下载</h2>
-    <a class="btn" href="dist/patchtool-v3.14.3.apk" download>
-      <b>酸败补丁助手 v3.14.3 · APK</b>
-      <span>205608 字节 · versionCode 35 · MD5 9ccd845fd4a5de59fbf570a0fee8ad38</span>
+    <a class="btn" href="dist/patchtool-v3.15.apk" download>
+      <b>酸败补丁助手 v3.15 · APK</b>
+      <span>2798508 字节 · versionCode 36 · MD5 13fc15fa270785a044eb724196741d64</span>
     </a>
-    <a class="btn" href="dist/patchtool-kit-v3.14.3.zip" download>
-      <b>完整工具包 v3.14.3 · ZIP</b>
-      <span>686739 字节 · 含 APK、源码、SU 脚本、操作指南、图标 · MD5 153fef894d51f796b8a4a2797df57ef7</span>
+    <a class="btn" href="dist/patchtool-kit-v3.15.zip" download>
+      <b>完整工具包 v3.15 · ZIP</b>
+      <span>8442464 字节 · 含 APK、源码、SU 脚本、操作指南、图标 · MD5 363141ef4a16a9f29c90a131cd6134f2</span>
     </a>
     <div class="dim">安装前请先在系统里授予「所有文件访问」；执行身份二选一：Shizuku 授权，或设备 root 直接授权。</div>
   </div>
@@ -61,6 +61,17 @@ li{margin:4px 0}
       <li>「↩ 一键回滚原版」按索引逐字节校验后还原，校验不符的文件会被拒绝，避免盖错</li>
       <li>反和谐为 <code>localmode.txt</code> 空文件开关，「🧹 清理备份」可释放空间并保留原版</li>
       <li>详细日志在 <code>操作日志/</code>，每次运行一个文件</li>
+    </ul>
+  </div>
+
+  <div class="card">
+    <h2>v3.15 更新</h2>
+    <ul>
+      <li>CAB 建表改为原生单进程扫描（<code>tools/cabscan.c</code> → <code>assets/cabscan-arm64</code> / <code>cabscan-armv7</code>，静态链接）</li>
+      <li>进程数从「约 2.6 万文件 × 2 次 fork」降到 1 次，读头改成 <code>read(8192)</code>，CAB 在内存里找</li>
+      <li>二进制拷到 <code>/data/local/tmp</code> 执行（<code>/sdcard</code> 是 noexec）；拷不过去 / ABI 不支持 / 退出码非 0 都自动回退旧 shell 管线</li>
+      <li>输出格式不变：<code>CAB-&lt;32位hex&gt;\t绝对路径</code>，CAB 原样大小写</li>
+      <li>扫描范围仍是 <code>files/data</code>；自检与完整性校验保留</li>
     </ul>
   </div>
 

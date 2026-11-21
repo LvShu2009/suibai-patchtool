@@ -2,15 +2,15 @@
 
 给手机游戏 **《300大作战》** 用的补丁安装工具。通过 **Shizuku**（无线调试 / root 启动均可）或**设备 root** 直接写入游戏的 `Android/data/<包名>/files`，带原版备份与一键回滚。
 
-当前版本：**v3.15**（versionCode 36）
+当前版本：**v3.15.1**（versionCode 37）
 
 > 本版为**纯本地版**：不申请 `INTERNET` 与 `ACCESS_NETWORK_STATE` 权限，不含在线补丁按钮、WebView 在线中心或任何第三方补丁站点地址。
 > 所有补丁都由你手动放进 `补丁存放位置（zip）/` 后安装。
 
 ## 下载
 
-- APK：`dist/patchtool-v3.15.apk`
-- 完整工具包：`dist/patchtool-kit-v3.15.zip`（含 APK、源码、SU 脚本、操作指南、图标）
+- APK：`dist/patchtool-v3.15.1.apk`
+- 完整工具包：`dist/patchtool-kit-v3.15.1.zip`（含 APK、源码、SU 脚本、操作指南、图标）
 
 ## 两条执行通道
 
@@ -91,6 +91,7 @@ LvShu/酸败补丁/
 
 ## 版本历史
 
+- **v3.15.1 本地版**：真机实测原生扫描 875s/28515 行仍是 32 条/秒，确认瓶颈在 FUSE；root 通道建表扫描根改走 `/data/media/0` 直连并记日志，Shizuku 通道不变。
 - **v3.15 本地版**：CAB 建表改原生单进程扫描（`tools/cabscan.c` → `assets/cabscan-arm64`/`cabscan-armv7` 静态二进制），进程数从 5 万次 fork 降到 1 次；二进制拷到 `/data/local/tmp` 执行，失败自动回退旧 shell 管线；输出格式与扫描范围不变。
 - **v3.14.3 本地版**：`files` 下再建 `files`、以及 `files/flies` 确认是历史误建（删掉后游戏正常、修复资源也不重建），一级目录一律排除 `files`/`flies`/`assets`/`Android`；CAB 索引与资源清单不再扫 `flies`，索引失效只看 `data`；SU 脚本同步排除两个子树。此前的兼容逻辑作废。
 - **v3.14.2 本地版**：APP 新增「清单映射」定位级——直接读游戏里的 `local_assetslist.json` / `server_assetslist.json`，文件名在清单里唯一、游戏里真实存在、CAB 一致才采纳；清单同名多路径直接跳过交给 CAB。收益只在「同名多处且尚无 CAB 索引」时（省掉建表），改名的文件救不了；SU 脚本未改。

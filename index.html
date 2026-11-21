@@ -26,18 +26,18 @@ li{margin:4px 0}
 </head>
 <body>
 <div class="wrap">
-  <h1>酸败补丁助手 <span class="tag">v3.15</span></h1>
+  <h1>酸败补丁助手 <span class="tag">v3.15.1</span></h1>
   <div class="sub">给手机游戏《300大作战》用的补丁安装工具 · 通过 Shizuku 或 root 写入游戏目录</div>
 
   <div class="card">
     <h2>下载</h2>
-    <a class="btn" href="dist/patchtool-v3.15.apk" download>
-      <b>酸败补丁助手 v3.15 · APK</b>
-      <span>2798508 字节 · versionCode 36 · MD5 13fc15fa270785a044eb724196741d64</span>
+    <a class="btn" href="dist/patchtool-v3.15.1.apk" download>
+      <b>酸败补丁助手 v3.15.1 · APK</b>
+      <span>2798508 字节 · versionCode 37 · MD5 d6f9b64baa46bf637bb277fec034b8b0</span>
     </a>
-    <a class="btn" href="dist/patchtool-kit-v3.15.zip" download>
-      <b>完整工具包 v3.15 · ZIP</b>
-      <span>8442464 字节 · 含 APK、源码、SU 脚本、操作指南、图标 · MD5 363141ef4a16a9f29c90a131cd6134f2</span>
+    <a class="btn" href="dist/patchtool-kit-v3.15.1.zip" download>
+      <b>完整工具包 v3.15.1 · ZIP</b>
+      <span>8443293 字节 · 含 APK、源码、SU 脚本、操作指南、图标 · MD5 c1d367394af8bc1de2e3e52633263363</span>
     </a>
     <div class="dim">安装前请先在系统里授予「所有文件访问」；执行身份二选一：Shizuku 授权，或设备 root 直接授权。</div>
   </div>
@@ -61,6 +61,16 @@ li{margin:4px 0}
       <li>「↩ 一键回滚原版」按索引逐字节校验后还原，校验不符的文件会被拒绝，避免盖错</li>
       <li>反和谐为 <code>localmode.txt</code> 空文件开关，「🧹 清理备份」可释放空间并保留原版</li>
       <li>详细日志在 <code>操作日志/</code>，每次运行一个文件</li>
+    </ul>
+  </div>
+
+  <div class="card">
+    <h2>v3.15.1 更新</h2>
+    <ul>
+      <li>真机日志：原生扫描 875s / 28515 行（约 32 条/秒），与旧管线持平 → 瓶颈是 FUSE，不是 fork</li>
+      <li>同份日志里部署走 <code>/data/media/0/...</code>、建表走 <code>/storage/emulated/0/...</code>，后者是 FUSE 视图</li>
+      <li>本版：root 通道建表扫描根自动改走 <code>/data/media/0</code> 直连，日志提示「绕开 FUSE」</li>
+      <li>Shizuku 通道不变（读不了 <code>/data/media/0</code>）；原生扫描器与回退逻辑不变</li>
     </ul>
   </div>
 

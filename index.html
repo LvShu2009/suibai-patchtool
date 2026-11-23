@@ -37,7 +37,7 @@ li{margin:4px 0}
     </a>
     <a class="btn" href="dist/patchtool-kit-v3.15.4.zip" download>
       <b>完整工具包 v3.15.4 · ZIP</b>
-      <span>8456088 字节 · 含 APK、源码、SU 脚本、操作指南、图标 · MD5 d18af8322a4e181aa0074bcad1070977</span>
+      <span>8456523 字节 · 含 APK、源码、SU 脚本、操作指南、图标 · MD5 c325bf3b5e3302975c16f4f8323b72ff</span>
     </a>
     <div class="dim">安装前请先在系统里授予「所有文件访问」；执行身份二选一：Shizuku 授权，或设备 root 直接授权。</div>
   </div>
@@ -69,6 +69,7 @@ li{margin:4px 0}
     <ul>
       <li>修掉 v3.15.3 打开即闪退：那一版 d8 少了 Shizuku 四个 jar，<code>rikka.shizuku.ShizukuProvider</code> 不在 dex 里，启动时被系统杀掉；本版运行时重新进 dex，类清单与 v3.15.2 一致（114 类）</li>
       <li><code>GameCover.mp4</code> 等游戏自带音视频不再被当「说明文件」跳过，有精确路径就照装</li>
+      <li>源码包 <code>build.sh</code> 补上 <code>-A assets</code>（原来漏了，直接用脚本编会丢 <code>cabscan</code> 原生二进制，产物仅 115KB）；APK 二进制未变</li>
       <li>png/jpg/md/txt 这类只在游戏里查不到同一精确路径时才跳过；作者打包在 zip 根的 <code>说明.txt</code>、<code>安装说明.txt</code>、<code>预览图.png</code> 仍然跳过</li>
     </ul>
   </div>

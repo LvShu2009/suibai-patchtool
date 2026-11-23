@@ -26,18 +26,18 @@ li{margin:4px 0}
 </head>
 <body>
 <div class="wrap">
-  <h1>酸败补丁助手 <span class="tag">v3.15.2</span></h1>
+  <h1>酸败补丁助手 <span class="tag">v3.15.3</span></h1>
   <div class="sub">给手机游戏《300大作战》用的补丁安装工具 · 通过 Shizuku 或 root 写入游戏目录</div>
 
   <div class="card">
     <h2>下载</h2>
-    <a class="btn" href="dist/patchtool-v3.15.2.apk" download>
-      <b>酸败补丁助手 v3.15.2 · APK</b>
-      <span>2798508 字节 · versionCode 38 · MD5 96f115d6de0a40f2345014bcbce33df9</span>
+    <a class="btn" href="dist/patchtool-v3.15.3.apk" download>
+      <b>酸败补丁助手 v3.15.3 · APK</b>
+      <span>2687916 字节 · versionCode 39 · MD5 9bbd7f3db1c6dad4e954e76f3c7522ce</span>
     </a>
-    <a class="btn" href="dist/patchtool-kit-v3.15.2.zip" download>
-      <b>完整工具包 v3.15.2 · ZIP</b>
-      <span>8444611 字节 · 含 APK、源码、SU 脚本、操作指南、图标 · MD5 753c23368a72da5a4537e17978b65622</span>
+    <a class="btn" href="dist/patchtool-kit-v3.15.3.zip" download>
+      <b>完整工具包 v3.15.3 · ZIP</b>
+      <span>8435104 字节 · 含 APK、源码、SU 脚本、操作指南、图标 · MD5 b368aae5247d60cedbf24259e4f37184</span>
     </a>
     <div class="dim">安装前请先在系统里授予「所有文件访问」；执行身份二选一：Shizuku 授权，或设备 root 直接授权。</div>
   </div>
@@ -61,6 +61,16 @@ li{margin:4px 0}
       <li>「↩ 一键回滚原版」按索引逐字节校验后还原，校验不符的文件会被拒绝，避免盖错</li>
       <li>反和谐为 <code>localmode.txt</code> 空文件开关，「🧹 清理备份」可释放空间并保留原版</li>
       <li>详细日志在 <code>操作日志/</code>，每次运行一个文件</li>
+    </ul>
+  </div>
+
+  <div class="card">
+    <h2>v3.15.3 更新</h2>
+    <ul>
+      <li>修掉 <code>GameCover.mp4</code> 被当「说明文件」跳过：<code>data/android/texture/GameCover.mp4</code> 是原版自带的启动封面，补丁带它就是要覆盖</li>
+      <li>音视频（mp4/mp3/m4a/ogg/wav/flac/aac/mkv/avi/mpg/mov）不再算侧文件，走正常定位</li>
+      <li>png/jpg/md/txt 这类只在「游戏里有同一精确路径」时才跳过；有路径就照装</li>
+      <li>作者打包在 zip 根的 <code>说明.txt</code>、<code>安装说明.txt</code>、<code>预览图.png</code> 仍然跳过，<code>localmode.txt</code> 例外照旧</li>
     </ul>
   </div>
 

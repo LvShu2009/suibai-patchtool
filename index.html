@@ -26,18 +26,18 @@ li{margin:4px 0}
 </head>
 <body>
 <div class="wrap">
-  <h1>酸败补丁助手 <span class="tag">v3.15.3</span></h1>
+  <h1>酸败补丁助手 <span class="tag">v3.15.4</span></h1>
   <div class="sub">给手机游戏《300大作战》用的补丁安装工具 · 通过 Shizuku 或 root 写入游戏目录</div>
 
   <div class="card">
     <h2>下载</h2>
-    <a class="btn" href="dist/patchtool-v3.15.3.apk" download>
-      <b>酸败补丁助手 v3.15.3 · APK</b>
-      <span>2687916 字节 · versionCode 39 · MD5 9bbd7f3db1c6dad4e954e76f3c7522ce</span>
+    <a class="btn" href="dist/patchtool-v3.15.4.apk" download>
+      <b>酸败补丁助手 v3.15.4 · APK</b>
+      <span>2708396 字节 · versionCode 40 · MD5 14facf5376afa5f6ad2ce3c3ea3cdb5e</span>
     </a>
-    <a class="btn" href="dist/patchtool-kit-v3.15.3.zip" download>
-      <b>完整工具包 v3.15.3 · ZIP</b>
-      <span>8435104 字节 · 含 APK、源码、SU 脚本、操作指南、图标 · MD5 b368aae5247d60cedbf24259e4f37184</span>
+    <a class="btn" href="dist/patchtool-kit-v3.15.4.zip" download>
+      <b>完整工具包 v3.15.4 · ZIP</b>
+      <span>8456088 字节 · 含 APK、源码、SU 脚本、操作指南、图标 · MD5 d18af8322a4e181aa0074bcad1070977</span>
     </a>
     <div class="dim">安装前请先在系统里授予「所有文件访问」；执行身份二选一：Shizuku 授权，或设备 root 直接授权。</div>
   </div>
@@ -65,7 +65,16 @@ li{margin:4px 0}
   </div>
 
   <div class="card">
-    <h2>v3.15.3 更新</h2>
+    <h2>v3.15.4 更新</h2>
+    <ul>
+      <li>修掉 v3.15.3 打开即闪退：那一版 d8 少了 Shizuku 四个 jar，<code>rikka.shizuku.ShizukuProvider</code> 不在 dex 里，启动时被系统杀掉；本版运行时重新进 dex，类清单与 v3.15.2 一致（114 类）</li>
+      <li><code>GameCover.mp4</code> 等游戏自带音视频不再被当「说明文件」跳过，有精确路径就照装</li>
+      <li>png/jpg/md/txt 这类只在游戏里查不到同一精确路径时才跳过；作者打包在 zip 根的 <code>说明.txt</code>、<code>安装说明.txt</code>、<code>预览图.png</code> 仍然跳过</li>
+    </ul>
+  </div>
+
+  <div class="card">
+    <h2>v3.15.3 更新（已撤回）</h2>
     <ul>
       <li>修掉 <code>GameCover.mp4</code> 被当「说明文件」跳过：<code>data/android/texture/GameCover.mp4</code> 是原版自带的启动封面，补丁带它就是要覆盖</li>
       <li>音视频（mp4/mp3/m4a/ogg/wav/flac/aac/mkv/avi/mpg/mov）不再算侧文件，走正常定位</li>

@@ -35,6 +35,10 @@ li{margin:4px 0}
       <b>酸败补丁助手 v3.15.4 · APK</b>
       <span>2708396 字节 · versionCode 40 · MD5 14facf5376afa5f6ad2ce3c3ea3cdb5e</span>
     </a>
+    <a class="btn" href="dist/patchtool-lite-v3.16.0.apk" download>
+      <b>酸败补丁助手 v3.16.0-lite · 精简版 APK</b>
+      <span>119592 字节 · versionCode 41 · MD5 ee40799dacaed77b05ce008607b9dae2 · 无原生 C 扫描</span>
+    </a>
     <a class="btn" href="dist/patchtool-kit-v3.15.4.zip" download>
       <b>完整工具包 v3.15.4 · ZIP</b>
       <span>8456523 字节 · 含 APK、源码、SU 脚本、操作指南、图标 · MD5 c325bf3b5e3302975c16f4f8323b72ff</span>
@@ -61,6 +65,16 @@ li{margin:4px 0}
       <li>「↩ 一键回滚原版」按索引逐字节校验后还原，校验不符的文件会被拒绝，避免盖错</li>
       <li>反和谐为 <code>localmode.txt</code> 空文件开关，「🧹 清理备份」可释放空间并保留原版</li>
       <li>详细日志在 <code>操作日志/</code>，每次运行一个文件</li>
+    </ul>
+  </div>
+
+  <div class="card">
+    <h2>v3.16.0-lite 精简版（新）</h2>
+    <ul>
+      <li>去掉 <code>assets/cabscan-arm64</code>（3.34MB）与 <code>cabscan-armv7</code>（2.83MB），APK 从 2.58MB 降到 <b>117KB</b></li>
+      <li>Java 逻辑与 v3.15.4 完全一致；建表时快路径找不到二进制，自动回退旧 shell 管线（875s / 28515 文件量级）</li>
+      <li>建表是一次性的：建完 <code>index.tsv</code> 后每次安装直接查表，日常使用与完整版无差别</li>
+      <li>versionCode 41（高于 40）；装精简版后再装回 3.15.4 需要先卸载</li>
     </ul>
   </div>
 

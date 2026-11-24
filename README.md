@@ -10,6 +10,7 @@
 ## 下载
 
 - APK：`dist/patchtool-v3.15.4.apk`
+- 精简版 APK：`dist/patchtool-lite-v3.16.0.apk`（119592 B，versionCode 41，无原生 C 扫描，约 117KB）
 - 完整工具包：`dist/patchtool-kit-v3.15.4.zip`（含 APK、源码、SU 脚本、操作指南、图标）
 
 ## 两条执行通道
@@ -92,6 +93,7 @@ LvShu/酸败补丁/
 ## 版本历史
 
 - **v3.15.4 本地版**：修掉 v3.15.3 闪退（d8 漏了 Shizuku 四个 jar，`ShizukuProvider` 不在 dex）；业务修复同 v3.15.3。
+- **v3.16.0-lite（新增）**：去掉原生 C 扫描（`cabscan-arm64`+`cabscan-armv7` 约 6.2MB），APK 2.58MB→117KB，Java 逻辑同 v3.15.4，建表自动回退旧 shell 管线。
 - **v3.15.4 源码包修正**：`build.sh` 补上 `-A assets`，否则直接编会丢 `cabscan` 原生二进制（产物仅 115KB，建表退回旧 shell 管线）。
 - **v3.15.3 本地版（已撤回，请勿使用）**：`GameCover.mp4` 等游戏自带音视频不再被当「说明文件」跳过；侧文件只在游戏里查不到同一精确路径时才跳过。
 - **v3.15.2 本地版**：修掉快路径 `ERR` 未定义导致 `FAST` 恒为 0 的 bug（v3.15/v3.15.1 实际都跑旧管线）；加产出校验与 `<out>.status`，App 日志直接显示 `FAST/BIN/CABN` 与二进制报错。
